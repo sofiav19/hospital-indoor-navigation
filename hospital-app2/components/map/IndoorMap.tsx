@@ -10,7 +10,10 @@ import {
   SymbolLayer,
   Images,
 } from "@maplibre/maplibre-react-native";
-
+console.log("MapView", MapView);
+console.log("ShapeSource", ShapeSource);
+console.log("CircleLayer", CircleLayer);
+console.log("Images", Images);
 const EMPTY_FC = { type: "FeatureCollection", features: [] };
 
 const MAP_STYLE = {
@@ -47,6 +50,8 @@ export default function IndoorMap({
   }, [nodes]);
 
   const userPoint = useMemo(() => {
+    console.log("userCoord:", userCoord);
+    console.log("userPoint:", JSON.stringify(userPoint));
     if (!userCoord) return EMPTY_FC;
     return {
       type: "FeatureCollection",
@@ -86,10 +91,10 @@ export default function IndoorMap({
         {/* POI icons */}
         <Images
           images={{
-            "door-icon": require("../../../assets/icons/door.png"),
-            "doors-icon": require("../../../assets/icons/doors.png"),
-            "stairs-icon": require("../../../assets/icons/stairs.png"),
-            "elevator-icon": require("../../../assets/icons/elevator.png"),
+            "door-icon": require("../../assets/icons/door.png"),
+            "doors-icon": require("../../assets/icons/doors.png"),
+            "stairs-icon": require("../../assets/icons/stairs.png"),
+            "elevator-icon": require("../../assets/icons/elevator.png"),
           }}
         />
 

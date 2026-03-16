@@ -2,7 +2,7 @@
 import React, { useEffect } from "react";
 import { useNavStore } from "../../store/navStore";
 import { validateNavigationData } from "../../lib/geojson/validateNavData";
-import { COORD_MODE, localToLngLat } from "../lib/coords/localToLngLat";
+import { COORD_MODE, localToLngLat } from "../../lib/coords/localToLngLat";
 
 // assets
 import nodesRaw from "../../assets/data/nodes_hospital.json";
