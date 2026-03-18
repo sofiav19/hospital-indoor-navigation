@@ -27,6 +27,16 @@ export const Colors = {
   },
 };
 
+export const AppPalette = {
+  primary: "#3F9BB0",
+  background: "#FFFFFF",
+  lists: "rgba(63, 155, 176, 0.10)",
+  lines: "rgba(63, 155, 176, 0.60)",
+  textSectionTitles: "#136B7F",
+  textPrimary: "#1D1B20",
+  surfaceAlt: "#EEF6F8",
+};
+
 export const Fonts = Platform.select({
   ios: {
     /** iOS `UIFontDescriptorSystemDesignDefault` */
