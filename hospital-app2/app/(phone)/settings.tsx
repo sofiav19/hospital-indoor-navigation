@@ -6,19 +6,10 @@ import { useNavStore } from "../../store/navStore";
 import { AppPalette } from "../../constants/theme";
 
 export default function Settings() {
-  const navData = useNavStore((s) => s.navData);
-  const start = useNavStore((s) => s.start);
   const prefer = useNavStore((s) => s.navigationUi.prefer);
   const soundEnabled = useNavStore((s) => s.navigationUi.soundEnabled);
-  const livePosition = useNavStore((s) => s.livePosition);
   const setNavigationPreference = useNavStore((s) => s.setNavigationPreference);
   const setSoundEnabled = useNavStore((s) => s.setSoundEnabled);
-  const setLivePositionProvider = useNavStore((s) => s.setLivePositionProvider);
-  const nudgeLivePosition = useNavStore((s) => s.nudgeLivePosition);
-  const setLiveStepMeters = useNavStore((s) => s.setLiveStepMeters);
-  const resetLivePositionToStart = useNavStore((s) => s.resetLivePositionToStart);
-
-  const startFeature = navData.nodes?.features?.find((feature: any) => feature.properties?.id === start.nodeId);
 
   return (
     <ScrollView
@@ -61,83 +52,6 @@ export default function Settings() {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Tracking provider</Text>
-        <Text style={styles.cardText}>
-          Keep the app ready for OptiTrack by switching between no live feed, a manual simulator, or OptiTrack.
-        </Text>
-        <View style={styles.row}>
-          <Pressable
-            style={[styles.option, livePosition.provider === "none" && styles.optionActive]}
-            onPress={() => setLivePositionProvider("none")}
-          >
-            <Text style={[styles.optionText, livePosition.provider === "none" && styles.optionTextActive]}>None</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.option, livePosition.provider === "simulated" && styles.optionActive]}
-            onPress={() => {
-              setLivePositionProvider("simulated");
-              resetLivePositionToStart();
-            }}
-          >
-            <Text style={[styles.optionText, livePosition.provider === "simulated" && styles.optionTextActive]}>Simulated</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.option, livePosition.provider === "optitrack" && styles.optionActive]}
-            onPress={() => setLivePositionProvider("optitrack")}
-          >
-            <Text style={[styles.optionText, livePosition.provider === "optitrack" && styles.optionTextActive]}>OptiTrack</Text>
-          </Pressable>
-        </View>
-        <Text style={styles.metaText}>
-          {`Start anchor: ${startFeature?.properties?.label || "Unknown"} | Current local position: ${livePosition.coords ? `${livePosition.coords[0].toFixed(2)}, ${livePosition.coords[1].toFixed(2)}` : "not set"}`}
-        </Text>
-      </View>
-
-      {livePosition.provider === "simulated" ? (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Walk simulator</Text>
-          <Text style={styles.cardText}>
-            This is the simplest testing pipeline for now: move the live user position in local meters and watch the map respond.
-          </Text>
-          <View style={styles.row}>
-            {[0.5, 1, 2].map((step) => (
-              <Pressable
-                key={step}
-                style={[styles.option, livePosition.stepMeters === step && styles.optionActive]}
-                onPress={() => setLiveStepMeters(step)}
-              >
-                <Text style={[styles.optionText, livePosition.stepMeters === step && styles.optionTextActive]}>
-                  {`${step} m`}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-          <View style={styles.simPad}>
-            <Pressable style={styles.simButton} onPress={() => nudgeLivePosition([0, livePosition.stepMeters])}>
-              <Text style={styles.simButtonText}>North</Text>
-            </Pressable>
-            <View style={styles.simRow}>
-              <Pressable style={styles.simButton} onPress={() => nudgeLivePosition([-livePosition.stepMeters, 0])}>
-                <Text style={styles.simButtonText}>West</Text>
-              </Pressable>
-              <Pressable style={styles.simButton} onPress={resetLivePositionToStart}>
-                <Text style={styles.simButtonText}>Reset</Text>
-              </Pressable>
-              <Pressable style={styles.simButton} onPress={() => nudgeLivePosition([livePosition.stepMeters, 0])}>
-                <Text style={styles.simButtonText}>East</Text>
-              </Pressable>
-            </View>
-            <Pressable style={styles.simButton} onPress={() => nudgeLivePosition([0, -livePosition.stepMeters])}>
-              <Text style={styles.simButtonText}>South</Text>
-            </Pressable>
-          </View>
-          <Text style={styles.metaText}>
-            Keyboard simulation is possible later on web, but these controls work right now on the phone too.
-          </Text>
-        </View>
-      ) : null}
-
-      <View style={styles.card}>
         <View style={styles.feedbackHeader}>
           <View>
             <Text style={styles.cardTitle}>Feedback y Sugerencias</Text>
@@ -170,7 +84,6 @@ const styles = StyleSheet.create({
   cardText: { fontSize: 14, color: AppPalette.textPrimary, lineHeight: 20 },
   feedbackHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 },
   row: { flexDirection: "row", gap: 10 },
-  metaText: { fontSize: 12, color: AppPalette.textSectionTitles, lineHeight: 18 },
   option: {
     borderRadius: 14,
     borderWidth: 1,
@@ -185,17 +98,4 @@ const styles = StyleSheet.create({
   },
   optionText: { fontWeight: "700", color: AppPalette.textSectionTitles },
   optionTextActive: { color: AppPalette.background },
-  simPad: { gap: 10, alignItems: "center" },
-  simRow: { flexDirection: "row", gap: 10 },
-  simButton: {
-    minWidth: 92,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: AppPalette.lines,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    alignItems: "center",
-    backgroundColor: AppPalette.background,
-  },
-  simButtonText: { fontWeight: "700", color: AppPalette.textPrimary },
 });
