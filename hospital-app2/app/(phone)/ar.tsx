@@ -1,11 +1,13 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { AppState, Pressable, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavStore } from "../../store/navStore";
+import { computeRoute } from "../../lib/route/routeEngine";
 import { buildDetailedInstruction } from "../../lib/route/navigationInstructions";
 import { AppPalette } from "../../constants/theme";
+import { projectGeoJSONForMap } from "../../lib/coords/localToLngLat";
 
 let CameraViewImpl: any = null;
 let useCameraPermissionsImpl: any = null;
@@ -167,6 +169,7 @@ export default function ArNavigation() {
   const [showHeadingReady, setShowHeadingReady] = useState(false);
 
   const navData = useNavStore((s) => s.navData);
+  const start = useNavStore((s) => s.start);
   const destinationId = useNavStore((s) => s.destinationId);
   const route = useNavStore((s) => s.route);
   const isStarted = useNavStore((s) => s.navigationUi.isStarted);
@@ -176,6 +179,7 @@ export default function ArNavigation() {
   const soundEnabled = useNavStore((s) => s.navigationUi.soundEnabled);
   const setNavigationPreference = useNavStore((s) => s.setNavigationPreference);
   const setMapViewMode = useNavStore((s) => s.setMapViewMode);
+  const setRoute = useNavStore((s) => s.setRoute);
   const setSoundEnabled = useNavStore((s) => s.setSoundEnabled);
   const livePosition = useNavStore((s) => s.livePosition);
 
@@ -539,6 +543,63 @@ export default function ArNavigation() {
     return `Planta ${currentFloor ?? "-"}`;
   }, [currentFloor, isStarted, visibleFloorOptions]);
 
+  const computeAndStoreRoute = useCallback(
+    (startId: string, reason: string | null = null, preferOverride?: "stairs" | "elevator") => {
+      if (!destinationId) {
+        return false;
+      }
+
+      const effectivePrefer = preferOverride ?? prefer;
+      const result = computeRoute(navData.nodes, navData.edges, startId, destinationId, { prefer: effectivePrefer });
+
+      if (!result.ok) {
+        setRoute({
+          ok: false,
+          geojson: null,
+          currentFloorGeojson: null,
+          futureFloorGeojson: null,
+          routeNodesGeojson: null,
+          summary: null,
+          reason: result.reason,
+        });
+        return false;
+      }
+
+      setRoute({
+        ok: true,
+        geojson: projectGeoJSONForMap(result.routeGeojson),
+        currentFloorGeojson: projectGeoJSONForMap(result.currentFloorGeojson),
+        futureFloorGeojson: projectGeoJSONForMap(result.futureFloorGeojson),
+        routeNodesGeojson: projectGeoJSONForMap(result.routeNodesGeojson),
+        summary: result.summary,
+        reason,
+      });
+
+      return true;
+    },
+    [destinationId, navData.edges, navData.nodes, prefer, setRoute]
+  );
+
+  const handlePreferencePress = useCallback(() => {
+    const nextPrefer = prefer === "stairs" ? "elevator" : "stairs";
+    setNavigationPreference(nextPrefer);
+
+    if (!isStarted || !destinationId) {
+      return;
+    }
+
+    const rerouteStartId = currentSegment?.fromNodeId || start.nodeId || "n_hospital_entrance_f0";
+    computeAndStoreRoute(rerouteStartId, "preference-change", nextPrefer);
+  }, [
+    computeAndStoreRoute,
+    currentSegment,
+    destinationId,
+    isStarted,
+    prefer,
+    setNavigationPreference,
+    start.nodeId,
+  ]);
+
   return (
     <View style={styles.screen}>
       {isCameraNativeAvailable && cameraPermission?.granted ? (
@@ -596,7 +657,7 @@ export default function ArNavigation() {
           <Pressable style={styles.actionButton} onPress={() => router.replace("/navigate")}>
             <Ionicons name="map-outline" size={28} color={AppPalette.background} />
           </Pressable>
-          <Pressable style={styles.actionButton} onPress={() => setNavigationPreference(prefer === "stairs" ? "elevator" : "stairs")}>
+          <Pressable style={styles.actionButton} onPress={handlePreferencePress}>
             <MaterialCommunityIcons
               name={prefer === "stairs" ? "stairs" : "elevator"}
               size={28}
@@ -1041,5 +1102,3 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 });
-
-
