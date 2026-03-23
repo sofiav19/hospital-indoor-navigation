@@ -606,11 +606,6 @@ export default function Navigate() {
   const [smoothedLiveHeading, setSmoothedLiveHeading] = useState<number | null>(null);
   const [recenterHeading, setRecenterHeading] = useState(0);
   const [recenterRequestedAt, setRecenterRequestedAt] = useState(0);
-  const [locationPermissionGranted, setLocationPermissionGranted] = useState<boolean | null>(null);
-  const [headingWatchError, setHeadingWatchError] = useState<string | null>(null);
-  const [hasHeadingSample, setHasHeadingSample] = useState(false);
-  const [showHeadingWarning, setShowHeadingWarning] = useState(false);
-
   const recenterToUser = useCallback(() => {
     setRecenterHeading(lockedHeading);
     setIsManualMapControl(false);
@@ -1246,24 +1241,6 @@ export default function Navigate() {
     return null;
   }, [optitrackHeading, sensorHeading]);
 
-  const headingStatusMessage = useMemo(() => {
-    if (!showHeadingWarning) return null;
-    if (typeof optitrackHeading === "number") return null;
-    if (typeof sensorHeading === "number") return null;
-    if (LocationImpl && !locationPermissionGranted) return "Active ubicación para orientar mejor";
-    if (headingWatchError) return "Sensor no disponible";
-    if (LocationImpl && locationPermissionGranted && !hasHeadingSample) {
-      return "Calibre la brújula moviendo el teléfono en un 8";
-    }
-    return "Orientación no disponible";
-  }, [
-    hasHeadingSample,
-    headingWatchError,
-    locationPermissionGranted,
-    optitrackHeading,
-    sensorHeading,
-    showHeadingWarning,
-  ]);
 
   useEffect(() => {
     if (typeof liveMapHeading !== "number" || !Number.isFinite(liveMapHeading)) {
@@ -1273,19 +1250,6 @@ export default function Navigate() {
 
     setSmoothedLiveHeading((previous) => smoothHeading(previous, liveMapHeading));
   }, [liveMapHeading]);
-
-  useEffect(() => {
-    if (typeof optitrackHeading === "number" || typeof sensorHeading === "number") {
-      setShowHeadingWarning(false);
-      return;
-    }
-
-    const timeout = setTimeout(() => {
-      setShowHeadingWarning(true);
-    }, 5000);
-
-    return () => clearTimeout(timeout);
-  }, [optitrackHeading, sensorHeading, locationPermissionGranted, headingWatchError, hasHeadingSample]);
 
   const arrivalLabel = useMemo(() => {
     const etaMinutes = route.summary?.etaMinutes;
@@ -1360,17 +1324,10 @@ export default function Navigate() {
       try {
         const currentPermission = await LocationImpl.getForegroundPermissionsAsync();
         let granted = currentPermission?.granted === true;
-        if (isMounted) {
-          setLocationPermissionGranted(granted);
-          setHeadingWatchError(null);
-        }
 
         if (!granted) {
           const requestedPermission = await LocationImpl.requestForegroundPermissionsAsync();
           granted = requestedPermission?.granted === true;
-          if (isMounted) {
-            setLocationPermissionGranted(granted);
-          }
         }
 
         if (!isMounted || !granted) return;
@@ -1385,7 +1342,6 @@ export default function Navigate() {
 
         if (isMounted && typeof initialValue === "number") {
           setSensorHeading(initialValue);
-          setHasHeadingSample(true);
         }
 
         subscription = await LocationImpl.watchHeadingAsync((heading: any) => {
@@ -1400,14 +1356,11 @@ export default function Navigate() {
 
           if (typeof nextHeading === "number") {
             setSensorHeading(nextHeading);
-            setHasHeadingSample(true);
-            setHeadingWatchError(null);
           }
         });
       } catch {
         if (isMounted) {
           setSensorHeading(null);
-          setHeadingWatchError("Sensor no disponible");
         }
       }
     }
@@ -2112,11 +2065,6 @@ export default function Navigate() {
                 <View style={styles.statusPill}>
                   <Text style={styles.statusPillText}>{statusMessage}</Text>
                 </View>
-                {headingStatusMessage ? (
-                  <View style={styles.warningPill}>
-                    <Text style={styles.warningPillText}>{headingStatusMessage}</Text>
-                  </View>
-                ) : null}
               </View>
             )}
           </>
@@ -2454,22 +2402,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#2A7C8E",
   },
   statusPillText: { fontSize: 16, fontWeight: "800", color: AppPalette.background, fontFamily: FONT_TITLE },
-  warningPill: {
-    maxWidth: 320,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 16,
-    backgroundColor: "rgba(106, 44, 14, 0.92)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 196, 140, 0.4)",
-  },
-  warningPillText: {
-    color: "#FFF5EB",
-    fontSize: 13,
-    lineHeight: 18,
-    textAlign: "center",
-    fontFamily: FONT_BODY,
-  },
   floorSwitchRow: {
     position: "absolute",
     right: 24,
