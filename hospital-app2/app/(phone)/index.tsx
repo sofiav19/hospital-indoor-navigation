@@ -2,8 +2,12 @@ import React from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { router } from "expo-router";
 import { AppPalette } from "../../constants/theme";
+import { useNavStore } from "../../store/navStore";
+import SearchScreen from "./search";
 
-export default function Home() {
+function HomeHero() {
+  const setHomeHeroDismissed = useNavStore((s) => s.setHomeHeroDismissed);
+
   return (
     <View style={styles.page}>
       <View style={styles.hero}>
@@ -13,7 +17,12 @@ export default function Home() {
         <Text style={styles.title}>CONSULTA</Text>
       </View>
 
-      <Pressable style={styles.btn} onPress={() => router.push("/search")}>
+      <Pressable
+        style={styles.btn}
+        onPress={() => {
+          setHomeHeroDismissed(true);
+        }}
+      >
         <Text style={styles.btnText}>COMENZAR</Text>
       </Pressable>
 
@@ -22,6 +31,16 @@ export default function Home() {
       </Pressable>
     </View>
   );
+}
+
+export default function Home() {
+  const hasDismissedHomeHero = useNavStore((s) => s.navigationUi.hasDismissedHomeHero);
+
+  if (hasDismissedHomeHero) {
+    return <SearchScreen />;
+  }
+
+  return <HomeHero />;
 }
 
 const styles = StyleSheet.create({
@@ -43,13 +62,6 @@ const styles = StyleSheet.create({
     fontWeight: "400",
     color: AppPalette.background,
     textAlign: "center",
-  },
-  subtitle: {
-    fontSize: 15,
-    color: AppPalette.background,
-    textAlign: "center",
-    marginBottom: 34,
-    opacity: 0.92,
   },
   btn: {
     backgroundColor: AppPalette.background,
