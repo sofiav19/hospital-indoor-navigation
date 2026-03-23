@@ -1694,50 +1694,6 @@ export default function Navigate() {
     userCoord,
   ]);
 
-  useEffect(() => {
-    if (!isStarted) {
-      hasHandledArrivalRef.current = false;
-      navigationStartedAtRef.current = 0;
-      return;
-    }
-
-    if (!navigationStartedAtRef.current) {
-      navigationStartedAtRef.current = Date.now();
-    }
-
-    if (!destinationId || !destinationFeature?.geometry?.coordinates || !userCoord) return;
-    if (hasHandledArrivalRef.current) return;
-    if (Date.now() - navigationStartedAtRef.current < 1200) return;
-
-    const destinationCoord = destinationFeature.geometry.coordinates as [number, number];
-    const distanceToDestination = distanceMeters(userCoord, destinationCoord);
-    const reachedDestinationNode =
-      confirmedNodeId === destinationId || lastPassedNodeId === destinationId;
-    const atFinalInstruction = activeStepIndex >= Math.max(segments.length - 1, 0);
-
-    const shouldComplete =
-      reachedDestinationNode ||
-      (atFinalInstruction && distanceToDestination <= STEP_TARGET_RADIUS_METERS) ||
-      distanceToDestination <= ARRIVAL_COMPLETE_RADIUS_METERS;
-
-    if (!shouldComplete) return;
-
-    hasHandledArrivalRef.current = true;
-    setShowSteps(false);
-    setNavigationStarted(false);
-    router.replace(`/post-navigation?completedDestinationId=${encodeURIComponent(destinationId)}`);
-  }, [
-    activeStepIndex,
-    confirmedNodeId,
-    destinationFeature,
-    destinationId,
-    isStarted,
-    lastPassedNodeId,
-    segments.length,
-    setNavigationStarted,
-    userCoord,
-  ]);
-
   const handleFloorPreviewPress = useCallback((previewFloor: number | null) => {
     if (previewFloor === null) return;
 
@@ -2110,8 +2066,8 @@ export default function Navigate() {
                 clearPostNavStartOverride();
               }
               setActiveStepIndex(0);
-              recenterToUser();
               setNavigationStarted(true);
+              recenterToUser();
             }}
           >
             <Text style={styles.startButtonText}>{isStarted ? "Finalizar" : "Comenzar"}</Text>
