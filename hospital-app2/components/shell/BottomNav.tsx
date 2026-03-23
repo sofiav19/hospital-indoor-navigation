@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { router, usePathname } from "expo-router";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useNavStore } from "../../store/navStore";
 
 const NAV_ITEMS = [
   { key: "home", label: "Inicio", route: "/", icon: "home-outline" as const, family: "ion" as const },
@@ -12,7 +13,7 @@ const NAV_ITEMS = [
 
 function isItemActive(pathname: string, itemKey: string) {
   if (itemKey === "home") return pathname === "/";
-  if (itemKey === "map") return ["/navigate", "/search"].includes(pathname);
+  if (itemKey === "map") return ["/navigate", "/search", "/ar"].includes(pathname);
   if (itemKey === "settings") return pathname === "/settings";
   return false;
 }
@@ -20,6 +21,7 @@ function isItemActive(pathname: string, itemKey: string) {
 export default function BottomNav() {
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
+  const mapViewMode = useNavStore((s) => s.navigationUi.mapViewMode);
 
   return (
     <View style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, 10) }]}>
@@ -27,12 +29,14 @@ export default function BottomNav() {
         {NAV_ITEMS.map((item) => {
           const active = isItemActive(pathname, item.key);
           const color = active ? "#56acc4" : "#111111";
+          const targetRoute =
+            item.key === "map" ? (mapViewMode === "ar" ? "/ar" : "/navigate") : item.route;
 
           return (
             <Pressable
               key={item.key}
               style={styles.item}
-              onPress={() => router.push(item.route as any)}
+              onPress={() => router.push(targetRoute as any)}
             >
               {item.family === "ion" ? (
                 <Ionicons name={item.icon} size={34} color={color} />
