@@ -162,6 +162,9 @@ export default function ArNavigation() {
   const [smoothedSensorHeading, setSmoothedSensorHeading] = useState<number | null>(null);
   const [headingWatchError, setHeadingWatchError] = useState(false);
   const [hasHeadingSample, setHasHeadingSample] = useState(false);
+  const [showHeadingBlocker, setShowHeadingBlocker] = useState(true);
+  const [showHeadingGraceHint, setShowHeadingGraceHint] = useState(false);
+  const [showHeadingReady, setShowHeadingReady] = useState(false);
 
   const navData = useNavStore((s) => s.navData);
   const destinationId = useNavStore((s) => s.destinationId);
@@ -338,6 +341,8 @@ export default function ArNavigation() {
     return null;
   }, [optitrackHeading, smoothedSensorHeading]);
 
+  const hasUsableHeading = typeof activeHeading === "number" && Number.isFinite(activeHeading);
+
   useEffect(() => {
     if (typeof sensorHeading !== "number" || !Number.isFinite(sensorHeading)) {
       setSmoothedSensorHeading(null);
@@ -390,19 +395,105 @@ export default function ArNavigation() {
     return absError > 45 ? "Gire a la derecha" : "Leve giro a la derecha";
   }, [activeHeading, headingError, targetHeading]);
 
-  const headingSourceLabel = useMemo(() => {
-    if (typeof optitrackHeading === "number") return "Referencia local";
-    if (typeof sensorHeading === "number") return "Brújula del teléfono";
-    if (locationPermissionGranted === null && LocationImpl) return "Comprobando orientación";
-    if (LocationImpl && !locationPermissionGranted) return "Active ubicación para orientar mejor";
-    if (headingWatchError) return "Sensor no disponible";
-    if (LocationImpl && locationPermissionGranted && !hasHeadingSample) {
-      return "Calibre la brújula moviendo el teléfono en un 8";
-    }
-    return "Orientación no disponible";
-  }, [hasHeadingSample, headingWatchError, locationPermissionGranted, optitrackHeading, sensorHeading]);
-
   const bannerIconName = useMemo(() => getBannerIconName(arHint), [arHint]);
+
+  useEffect(() => {
+    if (hasUsableHeading) {
+      setShowHeadingGraceHint(false);
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      setShowHeadingGraceHint(true);
+    }, 5000);
+
+    return () => clearTimeout(timeout);
+  }, [hasUsableHeading]);
+
+  useEffect(() => {
+    if (!showHeadingBlocker) return;
+
+    if (hasUsableHeading) {
+      setShowHeadingReady(true);
+      const timeout = setTimeout(() => {
+        setShowHeadingReady(false);
+        setShowHeadingBlocker(false);
+      }, 1400);
+
+      return () => clearTimeout(timeout);
+    }
+
+    setShowHeadingReady(false);
+  }, [hasUsableHeading, showHeadingBlocker]);
+
+  const headingBlockerState = useMemo(() => {
+    if (showHeadingReady) {
+      return {
+        tone: "success" as const,
+        title: "Brújula calibrada",
+        body: "Todo listo. Ya puede usar la navegación en RA.",
+      };
+    }
+
+    if (typeof optitrackHeading === "number") {
+      return {
+        tone: "success" as const,
+        title: "Referencia local lista",
+        body: "Ya puede usar la navegación en RA.",
+      };
+    }
+
+    if (locationPermissionGranted === null && LocationImpl) {
+      return {
+        tone: "info" as const,
+        title: "Comprobando orientación",
+        body: "Espere un momento mientras preparamos la orientación del dispositivo.",
+      };
+    }
+
+    if (LocationImpl && !locationPermissionGranted) {
+      return {
+        tone: "warning" as const,
+        title: "Se necesita orientación",
+        body: "Active la ubicación para orientar mejor la navegación en RA.",
+      };
+    }
+
+    if (headingWatchError) {
+      return {
+        tone: "warning" as const,
+        title: "Sensor no disponible",
+        body: "No hemos podido leer la brújula del teléfono. Cierre esta vista e inténtelo de nuevo.",
+      };
+    }
+
+    if (LocationImpl && locationPermissionGranted && !hasHeadingSample) {
+      return showHeadingGraceHint
+        ? {
+            tone: "warning" as const,
+            title: "Calibre la brújula",
+            body: "Mueva el teléfono dibujando un 8 para calibrar la orientación.",
+          }
+        : {
+            tone: "info" as const,
+            title: "Preparando la brújula",
+            body: "Mantenga el teléfono estable un momento mientras obtenemos la orientación.",
+          };
+    }
+
+    return {
+      tone: "warning" as const,
+      title: "Orientación no disponible",
+      body: "No hay orientación disponible todavía para la navegación en RA.",
+    };
+  }, [
+    hasHeadingSample,
+    headingWatchError,
+    locationPermissionGranted,
+    optitrackHeading,
+    showHeadingGraceHint,
+    showHeadingReady,
+  ]);
 
   const transitionZoneOptions = useMemo(() => {
     if (!userCoord || !navData.nodes) return [];
@@ -497,12 +588,6 @@ export default function ArNavigation() {
                 <Text style={styles.instructionDetail}>{nextInstruction.detail}</Text>
               ) : null}
 
-              {isStarted ? (
-                <View style={styles.headingMetaPill}>
-                  <Ionicons name="compass-outline" size={13} color={AppPalette.background} style={styles.headingMetaIcon} />
-                  <Text style={styles.headingMeta}>{headingSourceLabel}</Text>
-                </View>
-              ) : null}
             </View>
           </View>
         </View>
@@ -647,6 +732,37 @@ export default function ArNavigation() {
           </View>
         ) : null}
       </View>
+
+      {showHeadingBlocker && isCameraNativeAvailable && cameraPermission?.granted && isStarted && hasActiveRoute ? (
+        <View style={styles.blockerScrim}>
+          <View
+            style={[
+              styles.blockerCard,
+              headingBlockerState.tone === "success" ? styles.blockerCardSuccess : null,
+            ]}
+          >
+            <View
+              style={[
+                styles.blockerIconWrap,
+                headingBlockerState.tone === "success" ? styles.blockerIconWrapSuccess : null,
+              ]}
+            >
+              <Ionicons
+                name={headingBlockerState.tone === "success" ? "checkmark-circle" : "compass-outline"}
+                size={36}
+                color={headingBlockerState.tone === "success" ? "#175C36" : AppPalette.textPrimary}
+              />
+            </View>
+            <Text style={styles.blockerTitle}>{headingBlockerState.title}</Text>
+            <Text style={styles.blockerBody}>{headingBlockerState.body}</Text>
+            {!showHeadingReady ? (
+              <Pressable style={styles.blockerExitButton} onPress={() => router.replace("/navigate")}>
+                <Text style={styles.blockerExitButtonText}>Salir de RA</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -684,24 +800,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
     color: "rgba(29, 27, 32, 0.78)",
-  },
-  headingMeta: {
-    fontSize: 11,
-    fontWeight: "800",
-    color: AppPalette.background,
-  },
-  headingMetaPill: {
-    alignSelf: "flex-start",
-    marginTop: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: 999,
-    backgroundColor: "rgba(15, 30, 33, 0.42)",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  headingMetaIcon: {
-    marginRight: 6,
   },
   mapActions: {
     position: "absolute",
@@ -877,6 +975,70 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "800",
     color: AppPalette.background,
+  },
+  blockerScrim: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    backgroundColor: "rgba(7, 14, 18, 0.72)",
+    zIndex: 20,
+    elevation: 20,
+  },
+  blockerCard: {
+    width: "100%",
+    maxWidth: 360,
+    borderRadius: 28,
+    paddingHorizontal: 22,
+    paddingVertical: 24,
+    alignItems: "center",
+    backgroundColor: "#F3E4BB",
+    borderWidth: 2,
+    borderColor: "rgba(29, 27, 32, 0.14)",
+  },
+  blockerCardSuccess: {
+    backgroundColor: "#DDF4E3",
+  },
+  blockerIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.55)",
+    marginBottom: 14,
+  },
+  blockerIconWrapSuccess: {
+    backgroundColor: "rgba(255,255,255,0.72)",
+  },
+  blockerTitle: {
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: "800",
+    color: AppPalette.textPrimary,
+    textAlign: "center",
+  },
+  blockerBody: {
+    marginTop: 10,
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: "600",
+    color: "rgba(29, 27, 32, 0.8)",
+    textAlign: "center",
+  },
+  blockerExitButton: {
+    marginTop: 18,
+    minWidth: 160,
+    borderRadius: 16,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    backgroundColor: AppPalette.textPrimary,
+  },
+  blockerExitButtonText: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: AppPalette.background,
+    textAlign: "center",
   },
 });
 
