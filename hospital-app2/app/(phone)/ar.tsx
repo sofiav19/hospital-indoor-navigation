@@ -160,11 +160,21 @@ function isFloorGuideHint(hint: string) {
   return ["forward", "left", "right", "left-forward", "right-forward"].includes(hint);
 }
 
-function getFloorGuideShift(hint: string, progress: number) {
-  if (hint === "left") return -Math.max(0, progress - 0.62) * 140;
-  if (hint === "right") return Math.max(0, progress - 0.62) * 140;
-  if (hint === "left-forward") return -Math.max(0, progress - 0.72) * 170;
-  if (hint === "right-forward") return Math.max(0, progress - 0.72) * 170;
+function getFloorGuideVariant(hint: string) {
+  if (hint === "left" || hint === "left-forward") return "left" as const;
+  if (hint === "right" || hint === "right-forward") return "right" as const;
+  return "forward" as const;
+}
+
+function getFloorGuideShift(variant: ReturnType<typeof getFloorGuideVariant>, progress: number) {
+  const depth = 1 - progress;
+  if (depth <= 0.58) return 0;
+
+  const normalized = Math.min(1, (depth - 0.58) / 0.42);
+  const amount = Math.pow(normalized, 1.2) * 48;
+
+  if (variant === "left") return -amount;
+  if (variant === "right") return amount;
   return 0;
 }
 
@@ -441,6 +451,8 @@ export default function ArNavigation() {
     if (typeof maneuver === "string" && maneuver.length > 0) return maneuver;
     return getSegmentTurnHint(currentSegment, nextSegment);
   }, [bannerInstruction?.maneuver, currentSegment, nextSegment]);
+
+  const floorGuideVariant = useMemo(() => getFloorGuideVariant(arHint), [arHint]);
 
   const hasActiveRoute = Boolean(destinationId && route?.ok && segments.length);
 
@@ -833,14 +845,24 @@ export default function ArNavigation() {
               ) : null}
 
               {isFloorGuideHint(arHint) ? (
-                <View style={styles.floorGuideField}>
-                  {Array.from({ length: 6 }).map((_, index, list) => {
+                <View style={styles.floorGuidePlane}>
+                  <View style={styles.floorGuideField}>
+                  {Array.from({ length: 12 }).map((_, index, list) => {
                     const progress = index / Math.max(1, list.length - 1);
-                    const shift = getFloorGuideShift(arHint, progress);
+                    const shift = getFloorGuideShift(floorGuideVariant, progress);
                     const color = FLOOR_GUIDE_COLORS[index % FLOOR_GUIDE_COLORS.length];
                     const width = 72 + progress * 190;
                     const pointWidth = 24 + progress * 110;
                     const pointHeight = 9 + progress * 10;
+                    const depth = 1 - progress;
+                    const turnStrength =
+                      floorGuideVariant === "forward" || depth <= 0.58
+                        ? 0
+                        : Math.pow((depth - 0.58) / 0.42, 1.5);
+                    const turnDirection =
+                      floorGuideVariant === "left" ? -1 : floorGuideVariant === "right" ? 1 : 0;
+                    const curveOffsetX = turnDirection * turnStrength * 18;
+                    const curveRotation = turnDirection * turnStrength * 55;
                     return (
                       <View
                         key={`floor-guide-arrow-${index}`}
@@ -850,6 +872,7 @@ export default function ArNavigation() {
                             opacity: 0.5 + progress * 0.45,
                             width,
                             transform: [{ translateX: shift }],
+                            marginBottom: progress > 0.8 ? 2 : -2,
                           },
                         ]}
                       >
@@ -863,12 +886,17 @@ export default function ArNavigation() {
                               borderLeftColor: "transparent",
                               borderRightColor: "transparent",
                               borderBottomColor: color,
+                              transform: [
+                                { translateX: curveOffsetX },
+                                { rotateZ: `${curveRotation}deg` },
+                              ],
                             },
                           ]}
                         />
                       </View>
                     );
                   })}
+                  </View>
                 </View>
               ) : null}
 
@@ -1019,10 +1047,10 @@ const styles = StyleSheet.create({
   },
   arrowFloating: {
     position: "absolute",
-    bottom: 86,
+    bottom: 58,
     left: "50%",
-    marginLeft: -118,
-    width: 236,
+    marginLeft: -130,
+    width: 260,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1030,12 +1058,18 @@ const styles = StyleSheet.create({
     width: "100%",
     alignItems: "center",
     justifyContent: "flex-end",
-    gap: 6,
+    gap: 0,
+  },
+  floorGuidePlane: {
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    transform: [{ perspective: 900 }, { rotateX: "68deg" }],
   },
   floorGuideArrow: {
     alignItems: "center",
     justifyContent: "flex-start",
-    gap: 0,
+    marginBottom: -5,
   },
   floorGuideArrowPoint: {
     width: 0,
