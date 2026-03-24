@@ -2248,7 +2248,7 @@ export default function Navigate() {
         ) : null}
       </View>
 
-      <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 10) + 10 }]}>
+      <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom - 4, 6) }]}>
         <Pressable
           style={styles.sheetHandle}
           onPress={() => setShowSteps(true)}
@@ -2598,11 +2598,13 @@ const styles = StyleSheet.create({
   },
   mapActionBadge: {
     position: "absolute",
-    right: 8,
-    bottom: 6,
+    left: 0,
+    right: 0,
+    bottom: 3,
     fontSize: 10,
     fontWeight: "900",
     color: AppPalette.background,
+    textAlign: "center",
   },
   targetButton: {
     position: "absolute",
@@ -2674,16 +2676,23 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     paddingHorizontal: 18,
-    paddingTop: 8,
-    marginTop: 6,
+    paddingTop: 0,
+    paddingBottom: 0,
+    marginTop: 2,
   },
-  sheetHandle: { alignItems: "center", paddingBottom: 6 },
-  handleArrow: { transform: [{ scaleX: 2 }], marginBottom: -4 },
-  handleText: { color: AppPalette.background, fontWeight: "700", fontSize: 12, fontFamily: FONT_TITLE },
-  metricsRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 5 },
+  sheetHandle: { alignItems: "center", paddingBottom: 0 },
+  handleArrow: { transform: [{ scaleX: 2 }], marginBottom: -6 },
+  handleText: {
+    color: AppPalette.background,
+    fontWeight: "900",
+    fontSize: 15,
+    fontFamily: FONT_TITLE,
+    transform: [{ translateY: -4 }],
+  },
+  metricsRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 5, transform: [{ translateY: 8 }] },
   metric: { minWidth: 56 },
-  metricValue: { fontSize: 24, fontWeight: "800", color: AppPalette.background, fontFamily: FONT_TITLE },
-  metricLabel: { fontSize: 13, fontWeight: "700", color: AppPalette.background, fontFamily: FONT_BODY },
+  metricValue: { fontSize: 22, fontWeight: "800", color: AppPalette.background, fontFamily: FONT_TITLE },
+  metricLabel: { fontSize: 12, fontWeight: "700", color: AppPalette.background, fontFamily: FONT_BODY },
   startButton: {
     backgroundColor: AppPalette.background,
     borderRadius: 18,
