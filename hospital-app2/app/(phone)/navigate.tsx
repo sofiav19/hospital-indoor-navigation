@@ -7,6 +7,7 @@ import { useNavStore } from "../../store/navStore";
 import IndoorMap from "../../components/map/IndoorMap";
 import { computeRoute } from "../../lib/route/routeEngine";
 import { buildDetailedInstruction as buildSharedDetailedInstruction } from "../../lib/route/navigationInstructions";
+import { HOSPITAL_DIRECTORY } from "../../lib/hospitalDirectory";
 import { AppPalette } from "../../constants/theme";
 import { projectCoordsForMap, projectGeoJSONForMap } from "../../lib/coords/localToLngLat";
 
@@ -391,7 +392,9 @@ function getNodeFeature(nodes: any, nodeId: string | null) {
 }
 
 function getNodeLabel(nodes: any, nodeId: string | null) {
-  return getNodeFeature(nodes, nodeId)?.properties?.label || null;
+  const directoryLabel =
+    HOSPITAL_DIRECTORY.find((entry) => entry.destinationNodeId === nodeId)?.name || null;
+  return directoryLabel || getNodeFeature(nodes, nodeId)?.properties?.label || null;
 }
 
 function getNodeRole(nodes: any, nodeId: string | null) {
@@ -591,6 +594,7 @@ function getInstructionIconName(maneuver?: string | null) {
 export default function Navigate() {
   const [showSteps, setShowSteps] = useState(false);
   const [showStartDropdown, setShowStartDropdown] = useState(false);
+  const [showCurrentLocationFloorPrompt, setShowCurrentLocationFloorPrompt] = useState(false);
   const [startQuery, setStartQuery] = useState("");
   const [confirmedNodeId, setConfirmedNodeId] = useState<string | null>(null);
   const [lastPassedNodeId, setLastPassedNodeId] = useState<string | null>(null);
@@ -716,26 +720,18 @@ export default function Navigate() {
   );
 
   const startNodeOptions = useMemo(() => {
-    const features = navData.nodes?.features || [];
-    return features
-      .filter((feature: any) => {
-        const role = feature?.properties?.role;
-        return ["door", "doors", "junction", "elevator", "stairs"].includes(role);
-      })
-      .map((feature: any) => ({
-        id: feature.properties?.id,
-        label: feature.properties?.label || feature.properties?.id || "Nodo",
-        floor: feature.properties?.floor ?? null,
+    return HOSPITAL_DIRECTORY
+      .filter((entry) => entry.category === "entrances" && entry.floor === 0)
+      .map((entry) => ({
+        id: entry.destinationNodeId,
+        label: entry.name,
+        floor: entry.floor,
       }))
       .filter((item: any) => Boolean(item.id));
-  }, [navData.nodes]);
+  }, []);
 
   const entranceStartOptions = useMemo(() => {
-    return startNodeOptions.filter((item: any) => {
-      const label = String(item.label || "").toLowerCase();
-      const id = String(item.id || "").toLowerCase();
-      return label.includes("entrance") || label.includes("entrada") || id.includes("entrance") || id.includes("entrada");
-    });
+    return startNodeOptions;
   }, [startNodeOptions]);
 
   const searchedStartOptions = useMemo(() => {
@@ -749,29 +745,40 @@ export default function Navigate() {
     });
   }, [startNodeOptions, startQuery]);
 
-  const nearestCurrentLocationStart = useMemo(() => {
-    if (!livePosition.coords || !startNodeOptions.length || !navData.nodes) return null;
+  const currentLocationAvailable = useMemo(() => {
+    return Boolean(userCoord && navData.nodes?.features?.length);
+  }, [navData.nodes, userCoord]);
 
-    const [userX, userY] = livePosition.coords;
-    let nearest: (typeof startNodeOptions)[number] | null = null;
-    let nearestDistanceSq = Infinity;
+  const getNearestCurrentLocationNodeForFloor = useCallback(
+    (floor: number) => {
+      if (!userCoord || !navData.nodes?.features?.length) return null;
 
-    for (const option of startNodeOptions) {
-      const feature = navData.nodes.features?.find((node: any) => node.properties?.id === option.id);
-      const coords = feature?.geometry?.coordinates;
-      if (!coords) continue;
+      const [userX, userY] = userCoord;
+      let nearest: { id: string; label: string; floor: number | null } | null = null;
+      let nearestDistanceSq = Infinity;
 
-      const dx = coords[0] - userX;
-      const dy = coords[1] - userY;
-      const distanceSq = dx * dx + dy * dy;
-      if (distanceSq < nearestDistanceSq) {
-        nearestDistanceSq = distanceSq;
-        nearest = option;
+      for (const feature of navData.nodes.features || []) {
+        if ((feature?.properties?.floor ?? null) !== floor) continue;
+        const coords = feature?.geometry?.coordinates;
+        if (!coords) continue;
+
+        const dx = coords[0] - userX;
+        const dy = coords[1] - userY;
+        const distanceSq = dx * dx + dy * dy;
+        if (distanceSq < nearestDistanceSq) {
+          nearestDistanceSq = distanceSq;
+          nearest = {
+            id: feature.properties?.id,
+            label: getNodeLabel(navData.nodes, feature.properties?.id) || feature.properties?.id || "Nodo",
+            floor: feature.properties?.floor ?? null,
+          };
+        }
       }
-    }
 
-    return nearest;
-  }, [livePosition.coords, navData.nodes, startNodeOptions]);
+      return nearest;
+    },
+    [navData.nodes, userCoord]
+  );
 
   const renderedDestinationFeature = useMemo(
     () => navData.renderNodes?.features?.find((item: any) => item.properties?.id === destinationId) || null,
@@ -1799,13 +1806,14 @@ export default function Navigate() {
           <Pressable
             style={styles.locationCard}
             onPress={() => {
+              setShowCurrentLocationFloorPrompt(false);
               setShowStartDropdown((prev) => !prev);
               setStartQuery("");
             }}
           >
             <View style={styles.cardTextWrap}>
               <Text style={styles.cardLabel}>Inicio</Text>
-              <Text style={styles.cardTitle}>{startFeature?.properties?.label || "Seleccionar inicio"}</Text>
+              <Text style={styles.cardTitle}>{getNodeLabel(navData.nodes, effectiveStartNodeId) || "Seleccionar inicio"}</Text>
               <Text style={styles.cardMeta}>
                 {`Planta ${route.summary?.startFloor ?? startFeature?.properties?.floor ?? "-"}`}
               </Text>
@@ -1826,6 +1834,38 @@ export default function Navigate() {
                 <Ionicons name="search" size={18} color="rgba(29, 27, 32, 0.75)" />
               </View>
 
+              {showCurrentLocationFloorPrompt ? (
+                <View style={styles.currentLocationFloorPrompt}>
+                  <Text style={styles.currentLocationFloorPromptTitle}>
+                    ¿En qué planta se encuentra?
+                  </Text>
+                  <Text style={styles.currentLocationFloorPromptBody}>
+                    Antes de usar su ubicación actual, indique si se encuentra en la planta 0 o en la planta 1.
+                  </Text>
+                  <View style={styles.currentLocationFloorPromptActions}>
+                    {[0, 1].map((floor) => (
+                      <Pressable
+                        key={`current-location-floor-top-${floor}`}
+                        style={styles.currentLocationFloorButton}
+                        onPress={() => {
+                          const option = getNearestCurrentLocationNodeForFloor(floor);
+                          if (!option) return;
+                          setNavigationStarted(false);
+                          clearPostNavStartOverride();
+                          setLiveFloor(floor);
+                          setStartNode(option.id);
+                          setShowCurrentLocationFloorPrompt(false);
+                          setShowStartDropdown(false);
+                          setStartQuery("");
+                        }}
+                      >
+                        <Text style={styles.currentLocationFloorButtonText}>{`Planta ${floor}`}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
+
               <ScrollView style={styles.startOptionsScroll} contentContainerStyle={styles.startOptionsContent}>
                 {(startQuery.trim() ? searchedStartOptions : entranceStartOptions).map((option: any) => (
                   <Pressable
@@ -1835,6 +1875,7 @@ export default function Navigate() {
                       setNavigationStarted(false);
                       clearPostNavStartOverride();
                       setStartNode(option.id);
+                      setShowCurrentLocationFloorPrompt(false);
                       setShowStartDropdown(false);
                       setStartQuery("");
                     }}
@@ -1846,27 +1887,48 @@ export default function Navigate() {
 
                 <Pressable
                   style={styles.currentLocationOption}
-                  disabled={!nearestCurrentLocationStart}
                   onPress={() => {
-                    if (!nearestCurrentLocationStart) return;
-                    setNavigationStarted(false);
-                    clearPostNavStartOverride();
-                    setStartNode(nearestCurrentLocationStart.id);
-                    setShowStartDropdown(false);
-                    setStartQuery("");
+                    setShowCurrentLocationFloorPrompt(true);
                   }}
                 >
                   <Ionicons
                     name="locate"
                     size={18}
-                    color={nearestCurrentLocationStart ? AppPalette.primary : AppPalette.lines}
+                    color={currentLocationAvailable ? AppPalette.primary : AppPalette.lines}
                   />
                   <Text style={styles.currentLocationOptionText}>
-                    {nearestCurrentLocationStart
-                      ? `Ubicación actual (${nearestCurrentLocationStart.label})`
-                      : "Ubicación actual (no disponible)"}
+                    {currentLocationAvailable ? "Ubicación actual" : "Ubicación actual (no disponible)"}
                   </Text>
                 </Pressable>
+
+                {showCurrentLocationFloorPrompt ? (
+                  <View style={styles.currentLocationFloorPrompt}>
+                    <Text style={styles.currentLocationFloorPromptTitle}>
+                      ¿En qué planta se encuentra?
+                    </Text>
+                    <View style={styles.currentLocationFloorPromptActions}>
+                      {[0, 1].map((floor) => (
+                        <Pressable
+                          key={`current-location-floor-${floor}`}
+                          style={styles.currentLocationFloorButton}
+                          onPress={() => {
+                            const option = getNearestCurrentLocationNodeForFloor(floor);
+                            if (!option) return;
+                            setNavigationStarted(false);
+                            clearPostNavStartOverride();
+                            setLiveFloor(floor);
+                            setStartNode(option.id);
+                            setShowCurrentLocationFloorPrompt(false);
+                            setShowStartDropdown(false);
+                            setStartQuery("");
+                          }}
+                        >
+                          <Text style={styles.currentLocationFloorButtonText}>{`Planta ${floor}`}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
               </ScrollView>
             </View>
           ) : null}
@@ -1875,7 +1937,7 @@ export default function Navigate() {
             <View style={styles.cardTextWrap}>
               <Text style={styles.cardLabel}>Destino</Text>
               <Text style={styles.cardTitle}>
-                {destinationFeature?.properties?.label || "Seleccionar destino"}
+                {getNodeLabel(navData.nodes, destinationId) || "Seleccionar destino"}
               </Text>
               <Text style={styles.cardMeta}>
                 {route.ok
@@ -2246,6 +2308,50 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     color: AppPalette.primary,
+    fontFamily: FONT_BODY,
+  },
+  currentLocationFloorPrompt: {
+    marginTop: 8,
+    borderRadius: 16,
+    backgroundColor: "#EAF4FB",
+    borderWidth: 2,
+    borderColor: AppPalette.primary,
+    padding: 14,
+    gap: 10,
+    shadowColor: "#0D3A5A",
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  currentLocationFloorPromptTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: AppPalette.primary,
+    fontFamily: FONT_TITLE,
+  },
+  currentLocationFloorPromptBody: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: AppPalette.textPrimary,
+    fontFamily: FONT_BODY,
+  },
+  currentLocationFloorPromptActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  currentLocationFloorButton: {
+    flex: 1,
+    borderRadius: 12,
+    backgroundColor: AppPalette.primary,
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  currentLocationFloorButtonText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#FFFFFF",
     fontFamily: FONT_BODY,
   },
   mapWrap: { flex: 1, minHeight: 260, overflow: "hidden", position: "relative" },
