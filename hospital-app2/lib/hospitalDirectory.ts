@@ -11,7 +11,8 @@ export type HospitalDirectoryEntry = {
   id: string;
   category: DirectoryCategoryKey;
   name: string;
-  room?: string;
+  street?: string;
+  doctor?: string;
   floor: number;
   destinationNodeId: string;
   keywords: string[];
@@ -50,6 +51,7 @@ export const HOSPITAL_DIRECTORY: HospitalDirectoryEntry[] = [
     id: "spec-gynecology-f1",
     category: "specialties",
     name: "Ginecologia",
+    doctor: "Dra. Lucía Martín",
     floor: 1,
     destinationNodeId: "n_car_door_1",
     keywords: ["gynecologia", "obstetrica", "mujer"],
@@ -58,6 +60,7 @@ export const HOSPITAL_DIRECTORY: HospitalDirectoryEntry[] = [
     id: "spec-ultrasound-f1",
     category: "specialties",
     name: "Ecografia",
+    doctor: "Dr. Javier Ortega",
     floor: 1,
     destinationNodeId: "n_car_door_2",
     keywords: ["ultrasonido", "ecografia", "imagen"],
@@ -66,6 +69,7 @@ export const HOSPITAL_DIRECTORY: HospitalDirectoryEntry[] = [
     id: "spec-medical-tests-f1",
     category: "specialties",
     name: "Pruebas Medicas",
+    doctor: "Dra. Elena Ruiz",
     floor: 1,
     destinationNodeId: "n_car_door_3",
     keywords: ["pruebas", "medicas", "tests"],
@@ -74,22 +78,16 @@ export const HOSPITAL_DIRECTORY: HospitalDirectoryEntry[] = [
     id: "spec-radiology-f1",
     category: "specialties",
     name: "Radiologia",
+    doctor: "Dr. Carlos Vega",
     floor: 1,
     destinationNodeId: "n_neu_door_1",
     keywords: ["radiologia", "rayos x", "imaging"],
   },
   {
-    id: "spec-laboratory-f1",
-    category: "specialties",
-    name: "Laboratorio",
-    floor: 1,
-    destinationNodeId: "n_neu_door_2",
-    keywords: ["laboratorio", "analisis", "sangre"],
-  },
-  {
     id: "spec-pediatrics-f1",
     category: "specialties",
     name: "Pediatria",
+    doctor: "Dra. Marta Sánchez",
     floor: 1,
     destinationNodeId: "n_neu_door_3",
     keywords: ["pediatria", "ninos", "infantil"],
@@ -98,7 +96,8 @@ export const HOSPITAL_DIRECTORY: HospitalDirectoryEntry[] = [
   {
     id: "spec-cardiology-1-f0",
     category: "specialties",
-    name: "Cardiologia 1",
+    name: "Cardiologia General",
+    doctor: "Dr. Álvaro Pérez",
     floor: 0,
     destinationNodeId: "n_car_door_1_f0",
     keywords: ["cardiologia", "corazon", "cardio"],
@@ -106,7 +105,8 @@ export const HOSPITAL_DIRECTORY: HospitalDirectoryEntry[] = [
   {
     id: "spec-cardiology-2-f0",
     category: "specialties",
-    name: "Cardiologia 2",
+    name: "Cardiologia Preventiva",
+    doctor: "Dra. Paula Gómez",
     floor: 0,
     destinationNodeId: "n_car_door_2_f0",
     keywords: ["cardiologia", "corazon", "cardio"],
@@ -114,7 +114,8 @@ export const HOSPITAL_DIRECTORY: HospitalDirectoryEntry[] = [
   {
     id: "spec-cardiology-3-f0",
     category: "specialties",
-    name: "Cardiologia 3",
+    name: "Cardiologia de Arritmias",
+    doctor: "Dr. Sergio Navarro",
     floor: 0,
     destinationNodeId: "n_car_door_3_f0",
     keywords: ["cardiologia", "corazon", "cardio"],
@@ -122,7 +123,8 @@ export const HOSPITAL_DIRECTORY: HospitalDirectoryEntry[] = [
   {
     id: "spec-cardiology-4-f0",
     category: "specialties",
-    name: "Cardiologia 4",
+    name: "Consulta de Insuficiencia Cardíaca",
+    doctor: "Dra. Irene Lozano",
     floor: 0,
     destinationNodeId: "n_car_door_4_f0",
     keywords: ["cardiologia", "corazon", "cardio"],
@@ -130,7 +132,8 @@ export const HOSPITAL_DIRECTORY: HospitalDirectoryEntry[] = [
   {
     id: "spec-cardiology-5-f0",
     category: "specialties",
-    name: "Cardiologia 5",
+    name: "Consulta de Revisión Cardiológica",
+    doctor: "Dr. Rubén Molina",
     floor: 0,
     destinationNodeId: "n_car_door_5_f0",
     keywords: ["cardiologia", "corazon", "cardio"],
@@ -138,7 +141,8 @@ export const HOSPITAL_DIRECTORY: HospitalDirectoryEntry[] = [
   {
     id: "spec-neurology-1-f0",
     category: "specialties",
-    name: "Neurologia 1",
+    name: "Neurologia General",
+    doctor: "Dra. Ana Torres",
     floor: 0,
     destinationNodeId: "n_neu_door_1_f0",
     keywords: ["neurologia", "neuro", "sistema nervioso"],
@@ -146,7 +150,8 @@ export const HOSPITAL_DIRECTORY: HospitalDirectoryEntry[] = [
   {
     id: "spec-neurology-2-f0",
     category: "specialties",
-    name: "Neurologia 2",
+    name: "Neurologia de Cefaleas",
+    doctor: "Dr. Pablo Herrera",
     floor: 0,
     destinationNodeId: "n_neu_door_2_f0",
     keywords: ["neurologia", "neuro", "sistema nervioso"],
@@ -154,7 +159,8 @@ export const HOSPITAL_DIRECTORY: HospitalDirectoryEntry[] = [
   {
     id: "spec-neurology-3-f0",
     category: "specialties",
-    name: "Neurologia 3",
+    name: "Neurologia de Enfermedades Neurológicas",
+    doctor: "Dra. Clara Romero",
     floor: 0,
     destinationNodeId: "n_neu_door_3_f0",
     keywords: ["neurologia", "neuro", "sistema nervioso"],
@@ -163,33 +169,19 @@ export const HOSPITAL_DIRECTORY: HospitalDirectoryEntry[] = [
     id: "spec-wr-f0",
     category: "specialties",
     name: "Servicio WR",
+    doctor: "Dr. Miguel Castro",
     floor: 0,
     destinationNodeId: "n_wr_door_1_f0",
     keywords: ["servicio", "wr"],
   },
   // Diagnostics
   {
-    id: "diag-medical-tests-f1",
-    category: "diagnostics",
-    name: "Pruebas Medicas",
-    floor: 1,
-    destinationNodeId: "n_car_door_3",
-    keywords: ["pruebas", "medicas", "tests"],
-  },
-  {
     id: "diag-laboratory-f1",
     category: "diagnostics",
     name: "Analisis de Laboratorio",
+    doctor: "Dra. Sofía Gil",
     floor: 1,
     destinationNodeId: "n_neu_door_2",
-    keywords: ["laboratorio", "analisis", "sangre"],
-  },
-  {
-    id: "diag-laboratory-f0",
-    category: "diagnostics",
-    name: "Analisis de Laboratorio",
-    floor: 0,
-    destinationNodeId: "n_neu_door_2_f0",
     keywords: ["laboratorio", "analisis", "sangre"],
   },
   // Services
@@ -251,25 +243,10 @@ export const HOSPITAL_DIRECTORY: HospitalDirectoryEntry[] = [
   },
   // Entrances
   {
-    id: "ent-main-f1",
-    category: "entrances",
-    name: "Entrada Principal",
-    floor: 1,
-    destinationNodeId: "n_hospital_entrance",
-    keywords: ["entrada", "principal", "acceso"],
-  },
-  {
-    id: "ent-south-f1",
-    category: "entrances",
-    name: "Entrada Sur",
-    floor: 1,
-    destinationNodeId: "n_hospital_entrance_2",
-    keywords: ["entrada", "sur", "acceso"],
-  },
-  {
     id: "ent-main-f0",
     category: "entrances",
     name: "Entrada Principal",
+    street: "Calle de la Mancha, 14",
     floor: 0,
     destinationNodeId: "n_hospital_entrance_f0",
     keywords: ["entrada", "principal", "acceso"],
@@ -278,6 +255,7 @@ export const HOSPITAL_DIRECTORY: HospitalDirectoryEntry[] = [
     id: "ent-south-f0",
     category: "entrances",
     name: "Entrada Sur",
+    street: "Avenida de Almeria, 8",
     floor: 0,
     destinationNodeId: "n_hospital_entrance_2_f0",
     keywords: ["entrada", "sur", "acceso"],
