@@ -451,7 +451,7 @@ export default function IndoorMap({
           const isProgrammatic = Date.now() < programmaticCameraUntilRef.current;
           if (isProgrammatic) return;
 
-          if (isUserInteraction !== false) {
+          if (isUserInteraction === true) {
             markManualInteraction();
           }
         }}

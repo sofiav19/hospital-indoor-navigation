@@ -616,13 +616,6 @@ export default function Navigate() {
   const [smoothedLiveHeading, setSmoothedLiveHeading] = useState<number | null>(null);
   const [recenterHeading, setRecenterHeading] = useState(0);
   const [recenterRequestedAt, setRecenterRequestedAt] = useState(0);
-  const recenterToUser = useCallback(() => {
-    setRecenterHeading(lockedHeading);
-    setIsManualMapControl(false);
-    setIsFollowingUser(true);
-    setRecenterRequestedAt(Date.now());
-    setRecenterTick((value) => value + 1);
-  }, [lockedHeading]);
 
   const insets = useSafeAreaInsets();
 
@@ -656,6 +649,9 @@ export default function Navigate() {
   const rerouteNoticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasHandledArrivalRef = useRef(false);
   const navigationStartedAtRef = useRef(0);
+  const lastFollowRecenterAtRef = useRef(0);
+  const lastFollowUserCoordRef = useRef<[number, number] | null>(null);
+  const lastFollowStepIndexRef = useRef(-1);
 
   const effectiveStartNodeId = postNavStartOverrideId || start.nodeId || "n_hospital_entrance_f0";
 
@@ -688,6 +684,18 @@ export default function Navigate() {
   }, [livePosition]);
 
   const liveMapUserHeading = isStarted ? smoothedLiveHeading ?? lockedHeading : lockedHeading;
+
+  const recenterToUser = useCallback(() => {
+    const now = Date.now();
+    setRecenterHeading(lockedHeading);
+    setIsManualMapControl(false);
+    setIsFollowingUser(true);
+    lastFollowRecenterAtRef.current = now;
+    lastFollowUserCoordRef.current = userCoord;
+    lastFollowStepIndexRef.current = activeStepIndex;
+    setRecenterRequestedAt(now);
+    setRecenterTick((value) => value + 1);
+  }, [activeStepIndex, lockedHeading, userCoord]);
 
   const recenterTargetCoord = useMemo(() => {
     if (!isStarted) return mapUserCoord;
@@ -1527,6 +1535,26 @@ export default function Navigate() {
     if (!isManualMapControl) return;
     if (isFollowingUser) setIsFollowingUser(false);
   }, [isFollowingUser, isManualMapControl]);
+
+  useEffect(() => {
+    if (!isStarted || !isFollowingUser || isManualMapControl) return;
+    if (!userCoord) return;
+
+    const now = Date.now();
+    const lastCoord = lastFollowUserCoordRef.current;
+    const movedEnough = !lastCoord || distanceMeters(lastCoord, userCoord) >= 0.35;
+    const stepChanged = lastFollowStepIndexRef.current !== activeStepIndex;
+    const throttled = now - lastFollowRecenterAtRef.current < 300;
+
+    if ((!movedEnough && !stepChanged) || throttled) return;
+
+    lastFollowRecenterAtRef.current = now;
+    lastFollowUserCoordRef.current = userCoord;
+    lastFollowStepIndexRef.current = activeStepIndex;
+    setRecenterHeading(lockedHeading);
+    setRecenterRequestedAt(now);
+    setRecenterTick((value) => value + 1);
+  }, [activeStepIndex, isFollowingUser, isManualMapControl, isStarted, lockedHeading, userCoord]);
 
   useEffect(() => {
     if (!isStarted) return;
