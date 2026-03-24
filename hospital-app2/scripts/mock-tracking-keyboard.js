@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 const DEFAULT_PORT = Number(process.env.TRACKING_MOCK_PORT || 8080);
-const DEFAULT_STEP = Number(process.env.TRACKING_MOCK_STEP || 100);
+const DEFAULT_STEP_X = Number(process.env.TRACKING_MOCK_STEP_X || 100);
+const DEFAULT_STEP_Y = Number(process.env.TRACKING_MOCK_STEP_Y || 8);
 const DEFAULT_X = Number(process.env.TRACKING_MOCK_START_X || 0);
 const DEFAULT_Y = Number(process.env.TRACKING_MOCK_START_Y || 0);
 
@@ -16,7 +17,8 @@ try {
 
 let x = Number.isFinite(DEFAULT_X) ? DEFAULT_X : 0;
 let y = Number.isFinite(DEFAULT_Y) ? DEFAULT_Y : 0;
-let step = Number.isFinite(DEFAULT_STEP) && DEFAULT_STEP > 0 ? DEFAULT_STEP : 0.5;
+let stepX = Number.isFinite(DEFAULT_STEP_X) && DEFAULT_STEP_X > 0 ? DEFAULT_STEP_X : 100;
+let stepY = Number.isFinite(DEFAULT_STEP_Y) && DEFAULT_STEP_Y > 0 ? DEFAULT_STEP_Y : 8;
 
 const wss = new WebSocketServer({ host: "0.0.0.0", port: DEFAULT_PORT });
 
@@ -45,7 +47,7 @@ function renderStatus() {
   console.clear();
   console.log(`Mock tracking WS listening on ws://0.0.0.0:${DEFAULT_PORT}`);
   console.log("");
-  console.log(`Raw position: x=${x.toFixed(2)}  y=${y.toFixed(2)}  step=${step.toFixed(2)}`);
+  console.log(`Raw position: x=${x.toFixed(2)}  y=${y.toFixed(2)}  stepX=${stepX.toFixed(2)}  stepY=${stepY.toFixed(2)}`);
   console.log(`Clients: ${wss.clients.size}`);
   console.log("");
   console.log("Controls:");
@@ -53,15 +55,15 @@ function renderStatus() {
   console.log("  S / ArrowDown     move south (-y)");
   console.log("  A / ArrowLeft     move west (-x)");
   console.log("  D / ArrowRight    move east (+x)");
-  console.log("  +                 increase step by 20");
-  console.log("  -                 decrease step by 20");
+  console.log("  +                 increase both steps");
+  console.log("  -                 decrease both steps");
   console.log("  R                 reset to start");
   console.log("  P                 rebroadcast current position");
   console.log("  Q or Ctrl+C       quit");
 }
 
 function roundStep(value) {
-  return Math.max(20, Math.round(value));
+  return Math.max(1, Math.round(value));
 }
 
 function move(dx, dy) {
@@ -85,33 +87,35 @@ function handleKey(buffer) {
   }
 
   if (key === "w" || key === "W" || key === "\u001b[A") {
-    move(step, 0);
+    move(stepX, 0);
     return;
   }
 
   if (key === "s" || key === "S" || key === "\u001b[B") {
-    move(-step, 0);
+    move(-stepX, 0);
     return;
   }
 
   if (key === "a" || key === "A" || key === "\u001b[D") {
-    move(0, step);
+    move(0, stepY);
     return;
   }
 
   if (key === "d" || key === "D" || key === "\u001b[C") {
-    move(0, -step);
+    move(0, -stepY);
     return;
   }
 
   if (key === "+" || key === "=") {
-    step = roundStep(step + 20);
+    stepX = roundStep(stepX + 20);
+    stepY = Math.max(1, Math.round((stepY * 1.2) * 10) / 10);
     renderStatus();
     return;
   }
 
   if (key === "-" || key === "_") {
-    step = roundStep(step - 20);
+    stepX = roundStep(stepX - 20);
+    stepY = Math.max(1, Math.round((stepY / 1.2) * 10) / 10);
     renderStatus();
     return;
   }
