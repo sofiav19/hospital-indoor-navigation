@@ -38,18 +38,14 @@ export default function PostNavigation() {
     );
   }, [navData.nodes, previousGoalId]);
 
-  const doorNodeIds = useMemo(() => {
+  const availableNodeIds = useMemo(() => {
     const features = navData.nodes?.features || [];
-    return new Set(
-      features
-        .filter((feature: any) => feature.properties?.role === "door" || feature.properties?.role === "doors")
-        .map((feature: any) => feature.properties?.id)
-    );
+    return new Set(features.map((feature: any) => feature.properties?.id));
   }, [navData.nodes]);
 
   const availableEntries = useMemo(() => {
-    return HOSPITAL_DIRECTORY.filter((entry) => doorNodeIds.has(entry.destinationNodeId));
-  }, [doorNodeIds]);
+    return HOSPITAL_DIRECTORY.filter((entry) => availableNodeIds.has(entry.destinationNodeId));
+  }, [availableNodeIds]);
 
   const quickDestinations = useMemo(() => {
     const categoryOrder: DirectoryCategoryKey[] = ["specialties", "diagnostics", "entrances", "services"];
