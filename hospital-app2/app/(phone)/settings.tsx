@@ -57,7 +57,6 @@ export default function Settings() {
             <Text style={styles.cardTitle}>Feedback y Sugerencias</Text>
             <Text style={styles.cardText}>Ayúdanos a mejorar reportando problemas o enviando sugerencias.</Text>
           </View>
-          <Ionicons name="chatbubble-outline" size={24} color={AppPalette.primary} />
         </View>
         <Pressable
           style={[styles.option, { alignSelf: "flex-start" }]}
