@@ -13,6 +13,12 @@ let CameraViewImpl: any = null;
 let useCameraPermissionsImpl: any = null;
 let LocationImpl: any = null;
 
+const CURVE_TURN_MIN_DEGREES = 12;
+const HARD_TURN_MIN_DEGREES = 60;
+const STEP_PROGRESS_MIN = 0.992;
+const TURN_PROMPT_PROGRESS_MIN = 0.62;
+const TURN_PROMPT_DISTANCE_METERS = 1.4;
+
 try {
   const expoCamera = require("expo-camera");
   CameraViewImpl = expoCamera.CameraView;
@@ -106,9 +112,17 @@ function getSegmentTurnHint(currentSegment: any, nextSegment: any) {
   const delta = normalizeAngleDelta(nextHeading - currentHeading);
   const absDelta = Math.abs(delta);
 
-  if (absDelta < 22) return "forward" as const;
-  if (delta < 0) return absDelta >= 60 ? ("left" as const) : ("left-forward" as const);
-  return absDelta >= 60 ? ("right" as const) : ("right-forward" as const);
+  if (absDelta < CURVE_TURN_MIN_DEGREES) return "forward" as const;
+  if (delta < 0) return absDelta >= HARD_TURN_MIN_DEGREES ? ("left" as const) : ("left-forward" as const);
+  return absDelta >= HARD_TURN_MIN_DEGREES ? ("right" as const) : ("right-forward" as const);
+}
+
+function getImmediateTurnTitle(maneuver: string | null | undefined) {
+  if (maneuver === "left") return "Gire a la izquierda";
+  if (maneuver === "right") return "Gire a la derecha";
+  if (maneuver === "left-forward") return "Gire ligeramente a la izquierda";
+  if (maneuver === "right-forward") return "Gire ligeramente a la derecha";
+  return null;
 }
 
 function parseMeters(detail: string | null | undefined) {
@@ -121,13 +135,13 @@ function parseMeters(detail: string | null | undefined) {
 function getBannerIconName(hint: string) {
   switch (hint) {
     case "left":
-      return "arrow-left-thin";
+      return "arrow-left-top-bold";
     case "right":
-      return "arrow-right-thin";
+      return "arrow-right-top-bold";
     case "left-forward":
-      return "arrow-top-left-thin";
+      return "arrow-left-top-bold";
     case "right-forward":
-      return "arrow-top-right-thin";
+      return "arrow-right-top-bold";
     case "up":
       return "stairs-up";
     case "down":
@@ -331,11 +345,102 @@ export default function ArNavigation() {
   const nextInstruction = instructionItems[displayedInstructionIndex] || null;
   const userCoord = ((livePosition as any)?.coords as [number, number] | null) ?? null;
 
+  const activeInstructionProgress = useMemo(() => {
+    if (!userCoord) return 0;
+    const coords = currentSegment?.geojson?.features?.[0]?.geometry?.coordinates || [];
+    if (!Array.isArray(coords) || coords.length < 2) return 0;
+
+    let totalLength = 0;
+    let bestDistanceSq = Infinity;
+    let bestProgress = 0;
+    let traversedLength = 0;
+
+    for (let i = 1; i < coords.length; i++) {
+      totalLength += distanceMeters(coords[i - 1], coords[i]);
+    }
+
+    if (totalLength <= 0) return 0;
+
+    for (let i = 1; i < coords.length; i++) {
+      const start = coords[i - 1];
+      const end = coords[i];
+      const segX = end[0] - start[0];
+      const segY = end[1] - start[1];
+      const segLenSq = segX * segX + segY * segY;
+      const segLen = Math.sqrt(segLenSq);
+      if (segLenSq <= 0 || segLen <= 0) continue;
+
+      const tRaw = ((userCoord[0] - start[0]) * segX + (userCoord[1] - start[1]) * segY) / segLenSq;
+      const t = Math.max(0, Math.min(1, tRaw));
+      const projX = start[0] + segX * t;
+      const projY = start[1] + segY * t;
+      const dx = userCoord[0] - projX;
+      const dy = userCoord[1] - projY;
+      const distSq = dx * dx + dy * dy;
+
+      if (distSq < bestDistanceSq) {
+        bestDistanceSq = distSq;
+        bestProgress = (traversedLength + segLen * t) / totalLength;
+      }
+
+      traversedLength += segLen;
+    }
+
+    return bestProgress;
+  }, [currentSegment, userCoord]);
+
+  const activeInstructionDistanceToEnd = useMemo(() => {
+    if (!userCoord) return Infinity;
+    const coords = currentSegment?.geojson?.features?.[0]?.geometry?.coordinates || [];
+    if (!Array.isArray(coords) || coords.length < 2) return Infinity;
+    return distanceMeters(userCoord, coords[coords.length - 1]);
+  }, [currentSegment, userCoord]);
+
+  const bannerInstruction = useMemo(() => {
+    const currentInstruction = instructionItems[displayedInstructionIndex] || null;
+    const followingInstruction = instructionItems[displayedInstructionIndex + 1] || null;
+    const followingSegment = segments[displayedInstructionIndex + 1] || null;
+    const closeEnoughForTurnPrompt =
+      activeInstructionProgress >= TURN_PROMPT_PROGRESS_MIN ||
+      activeInstructionDistanceToEnd <= TURN_PROMPT_DISTANCE_METERS;
+
+    if (
+      !currentInstruction ||
+      !currentSegment ||
+      !followingSegment ||
+      isCrossFloorSegment(currentSegment) ||
+      isCrossFloorSegment(followingSegment) ||
+      !closeEnoughForTurnPrompt ||
+      activeInstructionProgress >= STEP_PROGRESS_MIN
+    ) {
+      return currentInstruction;
+    }
+
+    const upcomingTurn = getSegmentTurnHint(currentSegment, followingSegment);
+    const turnTitle = getImmediateTurnTitle(upcomingTurn);
+
+    if (!turnTitle) return currentInstruction;
+
+    return {
+      ...currentInstruction,
+      title: turnTitle,
+      detail: followingInstruction?.title || currentInstruction?.detail || null,
+      maneuver: upcomingTurn,
+    };
+  }, [
+    activeInstructionDistanceToEnd,
+    activeInstructionProgress,
+    currentSegment,
+    displayedInstructionIndex,
+    instructionItems,
+    segments,
+  ]);
+
   const arHint = useMemo(() => {
-    const maneuver = nextInstruction?.maneuver;
+    const maneuver = bannerInstruction?.maneuver;
     if (typeof maneuver === "string" && maneuver.length > 0) return maneuver;
     return getSegmentTurnHint(currentSegment, nextSegment);
-  }, [currentSegment, nextInstruction?.maneuver, nextSegment]);
+  }, [bannerInstruction?.maneuver, currentSegment, nextSegment]);
 
   const hasActiveRoute = Boolean(destinationId && route?.ok && segments.length);
 
@@ -379,7 +484,10 @@ export default function ArNavigation() {
     return clamp(headingError * 2.2, -130, 130);
   }, [headingError]);
 
-  const instructionDistanceMeters = useMemo(() => parseMeters(nextInstruction?.detail), [nextInstruction?.detail]);
+  const instructionDistanceMeters = useMemo(
+    () => parseMeters(bannerInstruction?.title) ?? parseMeters(bannerInstruction?.detail),
+    [bannerInstruction?.detail, bannerInstruction?.title]
+  );
 
   const arrowScale = useMemo(() => {
     if (!instructionDistanceMeters || instructionDistanceMeters <= 0) return 1;
@@ -642,11 +750,11 @@ export default function ArNavigation() {
                   ? "Inicie la navegaciÃ³n para ver guÃ­a en cÃ¡mara"
                   : !isStarted
                     ? "Inicie la navegaciÃ³n para ver guÃ­a en cÃ¡mara"
-                    : nextInstruction?.title || "ContinÃºe"}
+                    : bannerInstruction?.title || "ContinÃºe"}
               </Text>
 
-              {isStarted && nextInstruction?.detail ? (
-                <Text style={styles.instructionDetail}>{nextInstruction.detail}</Text>
+              {isStarted && bannerInstruction?.detail ? (
+                <Text style={styles.instructionDetail}>{bannerInstruction.detail}</Text>
               ) : null}
 
             </View>
