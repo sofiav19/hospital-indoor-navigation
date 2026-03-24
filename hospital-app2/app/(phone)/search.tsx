@@ -24,18 +24,14 @@ export default function Search() {
   const [query, setQuery] = useState("");
   const [focusedCategory, setFocusedCategory] = useState<DirectoryCategoryKey | null>(null);
 
-  const doorNodeIds = useMemo(() => {
+  const availableNodeIds = useMemo(() => {
     const features = navData.nodes?.features || [];
-    return new Set(
-      features
-        .filter((feature: any) => feature.properties?.role === "door" || feature.properties?.role === "doors")
-        .map((feature: any) => feature.properties?.id)
-    );
+    return new Set(features.map((feature: any) => feature.properties?.id));
   }, [navData.nodes]);
 
   const availableEntries = useMemo(() => {
-    return HOSPITAL_DIRECTORY.filter((entry) => doorNodeIds.has(entry.destinationNodeId));
-  }, [doorNodeIds]);
+    return HOSPITAL_DIRECTORY.filter((entry) => availableNodeIds.has(entry.destinationNodeId));
+  }, [availableNodeIds]);
 
   const availableCategories = useMemo(() => {
     const categoriesWithData = new Set(availableEntries.map((entry) => entry.category));
@@ -119,7 +115,7 @@ export default function Search() {
       const inCategory = focusedCategory ? entry.category === focusedCategory : true;
       if (!inCategory) return false;
 
-      const haystack = [entry.name, `planta ${entry.floor}`, ...entry.keywords]
+      const haystack = [entry.name, entry.doctor || "", entry.street || "", `planta ${entry.floor}`, ...entry.keywords]
         .map((value) => normalizeSearchValue(value))
         .join(" ");
 
@@ -222,7 +218,11 @@ export default function Search() {
             }}
           >
             <Text style={styles.itemText}>{item.name}</Text>
-            <Text style={styles.itemMeta}>{`${getBuildingLabel(item.destinationNodeId)} · Planta ${item.floor}`}</Text>
+            <Text style={styles.itemMeta}>
+              {item.category === "entrances"
+                ? `${item.street || getBuildingLabel(item.destinationNodeId)} · Planta ${item.floor}`
+                : `${getBuildingLabel(item.destinationNodeId)} · Planta ${item.floor}${item.doctor ? ` · ${item.doctor}` : ""}`}
+            </Text>
           </Pressable>
         )}
         ListEmptyComponent={<Text style={styles.emptyText}>No hay resultados para esa busqueda.</Text>}
