@@ -76,17 +76,22 @@ export default function Feedback() {
 
   return (
     <View style={styles.screen}>
-      <View style={[styles.sheetWrap, { marginTop: insets.top + 8 }]}>
+      <View style={[styles.sheetWrap, { marginTop: insets.top + 8, marginBottom: 12 }]}>
         <View style={styles.sheet}>
           <ScrollView
+            style={styles.scroll}
+            bounces={false}
+            alwaysBounceVertical={false}
+            overScrollMode="never"
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.sheetContent}
           >
-            <Pressable style={styles.closeButton} onPress={() => router.back()}>
-              <Ionicons name="close" size={38} color={AppPalette.textPrimary} />
-            </Pressable>
-
-            <Text style={styles.title}>Feedback</Text>
+            <View style={styles.headerRow}>
+              <Text style={styles.title}>Feedback</Text>
+              <Pressable style={styles.closeButton} onPress={() => router.back()}>
+                <Ionicons name="close" size={38} color={AppPalette.textPrimary} />
+              </Pressable>
+            </View>
 
             <Text style={styles.description}>
               Su opinión es anónima y nos ayuda a mejorar la experiencia.
@@ -221,27 +226,37 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 40,
     borderBottomLeftRadius: 40,
     borderBottomRightRadius: 40,
+    overflow: "hidden",
     paddingTop: 18,
     paddingHorizontal: 14,
+  },
+  scroll: {
+    flex: 1,
   },
   sheetContent: {
     paddingBottom: 60,
   },
+  headerRow: {
+    height: 48,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 5,
+  },
   closeButton: {
-    alignSelf: "flex-end",
+    position: "absolute",
+    right: 0,
+    top: 0,
     width: 48,
     height: 48,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 4,
   },
   title: {
     fontSize: 24,
     lineHeight: 30,
-    textAlign: "center",
     fontWeight: "700",
     color: AppPalette.primary,
-    marginBottom: 8,
+    textAlign: "center",
   },
   description: {
     fontSize: 15,

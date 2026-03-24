@@ -10,7 +10,7 @@ export default function Help() {
 
   return (
     <View style={styles.screen}>
-      <View style={[styles.sheetWrap, { marginTop: insets.top + 8, marginBottom: insets.bottom + 8 }]}>
+      <View style={[styles.sheetWrap, { marginTop: insets.top + 8, marginBottom: 12 }]}>
         <View style={styles.sheet}>
           <ScrollView
             style={styles.scroll}
@@ -89,7 +89,7 @@ const styles = StyleSheet.create({
     height: 48,
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 10,
+    marginBottom: 6,
   },
   closeButton: {
     position: "absolute",
