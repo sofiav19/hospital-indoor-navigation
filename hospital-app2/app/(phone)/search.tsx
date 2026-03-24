@@ -141,7 +141,7 @@ export default function Search() {
         </View>
         <Text style={styles.brandTitle}>
           <Text style={styles.brandTitlePrefix}>Hospital Universitario </Text>
-          <Text style={styles.brandTitleAccent}>Santa Aurora</Text>
+          <Text style={styles.brandTitleAccent}>Santa Teresa</Text>
         </Text>
       </View>
 

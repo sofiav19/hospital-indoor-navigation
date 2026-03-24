@@ -128,7 +128,7 @@ export default function PostNavigation() {
           <View style={styles.logoTextWrap}>
             <Text style={styles.logoTitle}>
               <Text style={styles.logoTopText}>Hospital Universitario </Text>
-              <Text style={styles.logoMainText}>Santa Aurora</Text>
+              <Text style={styles.logoMainText}>Santa Teresa</Text>
             </Text>
           </View>
         </View>
