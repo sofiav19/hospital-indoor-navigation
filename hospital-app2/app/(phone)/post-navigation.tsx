@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -127,11 +127,13 @@ export default function PostNavigation() {
       >
         <View style={styles.logoRow}>
           <View style={styles.logoMark}>
-            <Ionicons name="medical" size={28} color={AppPalette.background} />
+            <Image source={require("../../assets/icons/logo.png")} style={styles.logoImage} resizeMode="contain" />
           </View>
           <View style={styles.logoTextWrap}>
-            <Text style={styles.logoTopText}>Hospital</Text>
-            <Text style={styles.logoMainText}>Santa Aurora</Text>
+            <Text style={styles.logoTitle}>
+              <Text style={styles.logoTopText}>Hospital Universitario </Text>
+              <Text style={styles.logoMainText}>Santa Aurora</Text>
+            </Text>
           </View>
         </View>
 
@@ -197,31 +199,35 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginTop: 6,
-    marginBottom: 12,
+    marginBottom: 14,
   },
   logoMark: {
-    width: 50,
-    height: 50,
-    borderRadius: 12,
-    backgroundColor: AppPalette.primary,
+    width: 60,
+    height: 60,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 12,
+    marginRight: 14,
+  },
+  logoImage: {
+    width: 60,
+    height: 60,
   },
   logoTextWrap: {
     flex: 1,
   },
+  logoTitle: {
+    lineHeight: 30,
+  },
   logoTopText: {
-    fontSize: 12,
-    lineHeight: 14,
+    fontSize: 24,
+    lineHeight: 30,
     color: AppPalette.textSectionTitles,
     fontWeight: "600",
-    marginBottom: 2,
   },
   logoMainText: {
-    fontSize: 20,
-    lineHeight: 24,
-    color: AppPalette.primary,
+    fontSize: 32,
+    lineHeight: 30,
+    color: "#175C8E",
     fontWeight: "800",
   },
   titleRow: {

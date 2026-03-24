@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { View, Text, Pressable, FlatList, StyleSheet, TextInput } from "react-native";
+import { View, Text, Pressable, FlatList, StyleSheet, TextInput, Image } from "react-native";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavStore } from "../../store/navStore";
@@ -140,8 +140,13 @@ export default function Search() {
   return (
     <View style={styles.page}>
       <View style={styles.headerWrap}>
-        <Text style={styles.brandTitle}>Hospital Santa Aurora</Text>
-        <Text style={styles.brandSubTitle}>Madrid Norte</Text>
+        <View style={styles.brandMark}>
+          <Image source={require("../../assets/icons/logo.png")} style={styles.brandLogo} resizeMode="contain" />
+        </View>
+        <Text style={styles.brandTitle}>
+          <Text style={styles.brandTitlePrefix}>Hospital Universitario </Text>
+          <Text style={styles.brandTitleAccent}>Santa Aurora</Text>
+        </Text>
       </View>
 
       <View style={styles.searchRow}>
@@ -230,19 +235,36 @@ const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: AppPalette.background, paddingTop: 14 },
   headerWrap: {
     paddingHorizontal: 22,
-    marginBottom: 8,
+    marginBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+  },
+  brandMark: {
+    width: 54,
+    height: 54,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  brandLogo: {
+    width: 68,
+    height: 68,
   },
   brandTitle: {
-    fontSize: 30,
-    fontWeight: "700",
-    color: AppPalette.textSectionTitles,
-    lineHeight: 36,
+    flex: 1,
+    lineHeight: 38,
   },
-  brandSubTitle: {
-    fontSize: 44,
-    fontWeight: "700",
-    color: AppPalette.primary,
-    lineHeight: 48,
+  brandTitlePrefix: {
+    fontSize: 24,
+    fontWeight: "600",
+    color: AppPalette.textSectionTitles,
+    lineHeight: 38,
+  },
+  brandTitleAccent: {
+    fontSize: 32,
+    fontWeight: "800",
+    color: "#175C8E",
+    lineHeight: 38,
   },
   sectionHeading: {
     fontSize: 18,
