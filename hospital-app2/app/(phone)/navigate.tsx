@@ -7,7 +7,7 @@ import { useNavStore } from "../../store/navStore";
 import IndoorMap from "../../components/map/IndoorMap";
 import { computeRoute } from "../../lib/route/routeEngine";
 import { buildDetailedInstruction as buildSharedDetailedInstruction } from "../../lib/route/navigationInstructions";
-import { HOSPITAL_DIRECTORY } from "../../lib/hospitalDirectory";
+import { HOSPITAL_DIRECTORY, normalizeSearchValue } from "../../lib/hospitalDirectory";
 import { AppPalette } from "../../constants/theme";
 import { projectCoordsForMap, projectGeoJSONForMap } from "../../lib/coords/localToLngLat";
 
@@ -19,13 +19,16 @@ try {
   LocationImpl = null;
 }
 
-const NODE_CONFIRM_RADIUS_METERS = 0.3;
+const NODE_CONFIRM_RADIUS_METERS = 0.55;
 const REROUTE_SNAP_RADIUS_METERS = 1.25;
-const STEP_TARGET_RADIUS_METERS = 1.0;
-const STEP_PROGRESS_MIN = 0.97;
-const STEP_PROGRESS_WITH_RADIUS_MIN = 0.88;
-const STEP_PROGRESS_RADIUS_METERS = 1.8;
-const SEGMENT_TUBE_RADIUS_METERS = 1.3;
+const STEP_TARGET_RADIUS_METERS = 0.3;
+const TRANSITION_STEP_TARGET_RADIUS_METERS = 0.75;
+const STEP_PROGRESS_MIN = 0.992;
+const STEP_PROGRESS_WITH_RADIUS_MIN = 0.97;
+const TURN_PROMPT_PROGRESS_MIN = 0.62;
+const TURN_PROMPT_DISTANCE_METERS = 1.4;
+const STEP_PROGRESS_RADIUS_METERS = 0.85;
+const SEGMENT_TUBE_RADIUS_METERS = 0.9;
 const OFF_ROUTE_RADIUS_METERS = 2.1;
 const ARRIVAL_COMPLETE_RADIUS_METERS = 1.0;
 const TRANSITION_ZONE_RADIUS_METERS = 2.0;
@@ -170,6 +173,14 @@ function getTurnFromPreviousSegment(previousSegment: any, currentSegment: any) {
   return absDelta >= 60 ? ("right" as const) : ("right-forward" as const);
 }
 
+function getImmediateTurnTitle(maneuver: string | null | undefined) {
+  if (maneuver === "left") return "Gire a la izquierda";
+  if (maneuver === "right") return "Gire a la derecha";
+  if (maneuver === "left-forward") return "Gire ligeramente a la izquierda";
+  if (maneuver === "right-forward") return "Gire ligeramente a la derecha";
+  return null;
+}
+
 function getNearestNodeId(
   nodes: any,
   point: [number, number],
@@ -180,7 +191,6 @@ function getNearestNodeId(
 ) {
   const features = nodes?.features || [];
   const hasAllowedIds = Boolean(allowedIds?.size);
-  const isExcludedRole = (role: string | undefined) => role === "door" || role === "doors";
 
   const pickClosest = (predicate: (feature: any) => boolean) => {
     let bestId: string | null = null;
@@ -205,8 +215,7 @@ function getNearestNodeId(
   };
 
   const baseCandidate = (feature: any) => {
-    const role = feature?.properties?.role;
-    return !isExcludedRole(role);
+    return Boolean(feature?.properties?.id);
   };
 
   const sameFloorCandidate = (feature: any) => {
@@ -216,9 +225,6 @@ function getNearestNodeId(
   };
 
   return (
-    (destinationId
-      ? pickClosest((feature) => sameFloorCandidate(feature) && feature?.properties?.id === destinationId)
-      : null) ||
     (hasAllowedIds
       ? pickClosest((feature) => sameFloorCandidate(feature) && Boolean(allowedIds?.has(feature?.properties?.id)))
       : null) ||
@@ -572,13 +578,13 @@ function buildDetailedInstruction(
 function getInstructionIconName(maneuver?: string | null) {
   switch (maneuver) {
     case "left":
-      return "arrow-top-left";
+      return "arrow-left-top-bold";
     case "right":
-      return "arrow-top-right";
+      return "arrow-right-top-bold";
     case "left-forward":
-      return "arrow-top-left";
+      return "arrow-left-top-bold";
     case "right-forward":
-      return "arrow-top-right";
+      return "arrow-right-top-bold";
     case "down":
       return "stairs-down";
     case "up":
@@ -721,7 +727,7 @@ export default function Navigate() {
 
   const startNodeOptions = useMemo(() => {
     return HOSPITAL_DIRECTORY
-      .filter((entry) => entry.category === "entrances" && entry.floor === 0)
+      .filter((entry) => entry.category === "entrances")
       .map((entry) => ({
         id: entry.destinationNodeId,
         label: entry.name,
@@ -735,15 +741,34 @@ export default function Navigate() {
   }, [startNodeOptions]);
 
   const searchedStartOptions = useMemo(() => {
-    const q = startQuery.trim().toLowerCase();
+    const q = normalizeSearchValue(startQuery);
     if (!q) return [];
 
-    return startNodeOptions.filter((item: any) => {
-      const floorText = item.floor === null ? "" : `planta ${item.floor}`;
-      const haystack = `${String(item.label).toLowerCase()} ${String(item.id).toLowerCase()} ${floorText}`;
-      return haystack.includes(q);
-    });
-  }, [startNodeOptions, startQuery]);
+    return HOSPITAL_DIRECTORY
+      .map((entry) => ({
+        id: entry.destinationNodeId,
+        label: entry.name,
+        floor: entry.floor,
+        keywords: entry.keywords || [],
+      }))
+      .filter((item: any) => Boolean(item.id))
+      .filter((item: any) => {
+        const floorText = item.floor === null ? "" : `planta ${item.floor}`;
+        const haystack = normalizeSearchValue(
+          `${String(item.label)} ${String(item.id)} ${floorText} ${item.keywords.join(" ")}`
+        );
+        return haystack.includes(q);
+      })
+      .filter(
+        (item: any, index: number, list: any[]) =>
+          index ===
+          list.findIndex(
+            (candidate: any) =>
+              candidate.id === item.id &&
+              candidate.floor === item.floor
+          )
+      );
+  }, [startQuery]);
 
   const currentLocationAvailable = useMemo(() => {
     return Boolean(userCoord && navData.nodes?.features?.length);
@@ -819,6 +844,12 @@ export default function Navigate() {
     return autoFloor;
   }, [autoFloor, committedFloorLock, navigationFloor, transitionFloorLock]);
 
+  const routingFloor = useMemo(() => {
+    if (committedFloorLock !== null) return committedFloorLock;
+    if (navigationFloor !== null && navigationFloor !== undefined) return navigationFloor;
+    return autoFloor;
+  }, [autoFloor, committedFloorLock, navigationFloor]);
+
   const routeNodeOrder = useMemo(() => {
     const order = new Map<string, number>();
     (route.summary?.nodePath || []).forEach((nodeId: string, index: number) => {
@@ -876,8 +907,8 @@ export default function Navigate() {
   }, [activeStepIndex, segments]);
 
   const nodeSelectionFloor = useMemo(
-    () => currentFloor ?? livePosition.floor ?? confirmedNodeFeature?.properties?.floor ?? null,
-    [confirmedNodeFeature, currentFloor, livePosition.floor]
+    () => routingFloor ?? livePosition.floor ?? confirmedNodeFeature?.properties?.floor ?? null,
+    [confirmedNodeFeature, livePosition.floor, routingFloor]
   );
 
   const nearbyAllowedNode = useMemo(() => {
@@ -958,6 +989,15 @@ export default function Navigate() {
     if (!Array.isArray(coords) || coords.length < 2) return 0;
 
     return getProgressAlongPolyline(userCoord, coords);
+  }, [activeInstructionSegment, userCoord]);
+
+  const activeInstructionDistanceToEnd = useMemo(() => {
+    if (!userCoord) return Infinity;
+
+    const coords = activeInstructionSegment?.geojson?.features?.[0]?.geometry?.coordinates || [];
+    if (!Array.isArray(coords) || coords.length < 2) return Infinity;
+
+    return distanceMeters(userCoord, coords[coords.length - 1]);
   }, [activeInstructionSegment, userCoord]);
 
   const activeInstructionFloorOverride = useMemo(() => {
@@ -1090,7 +1130,46 @@ export default function Navigate() {
   ]);
 
   const nextInstruction = instructionItems[displayedInstructionIndex] || null;
-  const instructionIconName = getInstructionIconName(nextInstruction?.maneuver);
+  const bannerInstruction = useMemo(() => {
+    const currentInstruction = instructionItems[displayedInstructionIndex] || null;
+    const currentSegment = segments[displayedInstructionIndex] || null;
+    const followingInstruction = instructionItems[displayedInstructionIndex + 1] || null;
+    const followingSegment = segments[displayedInstructionIndex + 1] || null;
+    const closeEnoughForTurnPrompt =
+      activeInstructionProgress >= TURN_PROMPT_PROGRESS_MIN ||
+      activeInstructionDistanceToEnd <= TURN_PROMPT_DISTANCE_METERS;
+
+    if (
+      !currentInstruction ||
+      !currentSegment ||
+      !followingSegment ||
+      isCrossFloorSegment(currentSegment) ||
+      isCrossFloorSegment(followingSegment) ||
+      !closeEnoughForTurnPrompt ||
+      activeInstructionProgress >= STEP_PROGRESS_MIN
+    ) {
+      return currentInstruction;
+    }
+
+    const upcomingTurn = getSegmentTurnHint(currentSegment, followingSegment);
+    const turnTitle = getImmediateTurnTitle(upcomingTurn);
+
+    if (!turnTitle) return currentInstruction;
+
+    return {
+      ...currentInstruction,
+      title: turnTitle,
+      detail: followingInstruction?.title || currentInstruction?.detail || null,
+      maneuver: upcomingTurn,
+    };
+  }, [
+    activeInstructionDistanceToEnd,
+    activeInstructionProgress,
+    displayedInstructionIndex,
+    instructionItems,
+    segments,
+  ]);
+  const instructionIconName = getInstructionIconName(bannerInstruction?.maneuver);
 
   const visibleFloorOptions = useMemo(() => {
     if (!isStarted) return [];
@@ -1268,19 +1347,23 @@ export default function Navigate() {
   }, [route.summary?.etaMinutes]);
 
   const startedRouteLayers = useMemo(() => {
-    const primarySegment = segments[displayedInstructionIndex] || null;
+    const visibleSegments = segments
+      .map((segment: any, index: number) => ({ segment, index }))
+      .filter(({ segment }) => segmentTouchesFloor(segment, currentFloor));
 
-    const primaryFeatures =
-      primarySegment && segmentTouchesFloor(primarySegment, currentFloor)
-        ? primarySegment?.geojson?.features || []
-        : [];
+    const remainingVisibleSegments = visibleSegments.filter(({ index }) => index >= activeStepIndex);
+    const completedVisibleSegments = visibleSegments.filter(({ index }) => index < activeStepIndex);
 
-    const secondaryFeatures = segments
-      .filter((segment: any, index: number) => {
-        if (index === displayedInstructionIndex) return false;
-        return segmentTouchesFloor(segment, currentFloor);
-      })
-      .flatMap((segment: any) => segment?.geojson?.features || []);
+    const primarySegment = remainingVisibleSegments[0]?.segment || null;
+
+    const primaryFeatures = primarySegment?.geojson?.features || [];
+
+    const secondaryFeatures = [
+      ...completedVisibleSegments.flatMap(({ segment }) => segment?.geojson?.features || []),
+      ...remainingVisibleSegments
+        .filter(({ segment }) => segment !== primarySegment)
+        .flatMap(({ segment }) => segment?.geojson?.features || []),
+    ];
 
     return {
       primary: primaryFeatures.length
@@ -1288,7 +1371,7 @@ export default function Navigate() {
             type: "FeatureCollection",
             features: primaryFeatures,
           })
-        : route.currentFloorGeojson || route.geojson,
+        : null,
       secondary: secondaryFeatures.length
         ? {
             type: "FeatureCollection",
@@ -1300,7 +1383,7 @@ export default function Navigate() {
           }
         : null,
     };
-  }, [currentFloor, displayedInstructionIndex, route.currentFloorGeojson, route.geojson, segments]);
+  }, [activeStepIndex, currentFloor, segments]);
 
   useEffect(() => {
     return () => {
@@ -1483,6 +1566,14 @@ export default function Navigate() {
       if (
         nearbyNodeFloor !== null &&
         committedFloorLock !== null &&
+        nearbyNodeFloor !== committedFloorLock
+      ) {
+        setCommittedFloorLock(null);
+      }
+
+      if (
+        nearbyNodeFloor !== null &&
+        committedFloorLock !== null &&
         nearbyNodeFloor === committedFloorLock &&
         livePosition.floor !== committedFloorLock
       ) {
@@ -1498,6 +1589,7 @@ export default function Navigate() {
     nearbyAllowedNode,
     nearbyInstructionNode,
     routeNodeOrder,
+    setCommittedFloorLock,
     setLiveFloor,
   ]);
 
@@ -1555,11 +1647,16 @@ export default function Navigate() {
     const distToTarget = distanceMeters(userCoord, targetCoord);
     const progress = getProgressAlongPolyline(userCoord, segmentCoords);
     const segmentTubeDistance = distanceToPolyline(userCoord, segmentCoords);
-    const reachedConfirmedTarget = confirmedNodeId === currentSegment?.toNodeId;
+    const stepTargetRadius = isCrossFloorSegment(currentSegment)
+      ? TRANSITION_STEP_TARGET_RADIUS_METERS
+      : STEP_TARGET_RADIUS_METERS;
+    const reachedConfirmedTarget =
+      confirmedNodeId === currentSegment?.toNodeId &&
+      distToTarget <= STEP_PROGRESS_RADIUS_METERS;
 
     const shouldAdvance =
       reachedConfirmedTarget ||
-      distToTarget <= STEP_TARGET_RADIUS_METERS ||
+      distToTarget <= stepTargetRadius ||
       progress >= STEP_PROGRESS_MIN ||
       (
         progress >= STEP_PROGRESS_WITH_RADIUS_MIN &&
@@ -1603,7 +1700,6 @@ export default function Navigate() {
 
   useEffect(() => {
     if (!isStarted || !userCoord) return;
-    if (hasManualFloorSelection && transitionFloorLock !== null) return;
 
     const activeSegment = segments[activeStepIndex] || null;
     const activeCoords = activeSegment?.geojson?.features?.[0]?.geometry?.coordinates || [];
@@ -1633,11 +1729,11 @@ export default function Navigate() {
     const now = Date.now();
     if (now - lastRerouteAtRef.current < 2000) return;
 
-    const confirmedNodeOnCurrentFloor = isNodeOnFloor(navData.nodes, confirmedNodeId, currentFloor)
+    const confirmedNodeOnCurrentFloor = isNodeOnFloor(navData.nodes, confirmedNodeId, routingFloor)
       ? confirmedNodeId
       : null;
 
-    const lastPassedNodeOnCurrentFloor = isNodeOnFloor(navData.nodes, lastPassedNodeId, currentFloor)
+    const lastPassedNodeOnCurrentFloor = isNodeOnFloor(navData.nodes, lastPassedNodeId, routingFloor)
       ? lastPassedNodeId
       : null;
 
@@ -1646,7 +1742,7 @@ export default function Navigate() {
         ? getNearestNodeId(
             navData.nodes,
             userCoord,
-            currentFloor,
+            routingFloor,
             destinationId,
             currentInstructionNodeIds,
             REROUTE_SNAP_RADIUS_METERS
@@ -1655,7 +1751,7 @@ export default function Navigate() {
       getNearestNodeId(
         navData.nodes,
         userCoord,
-        currentFloor,
+        routingFloor,
         destinationId,
         forwardAllowedNodeIds,
         REROUTE_SNAP_RADIUS_METERS
@@ -1665,7 +1761,7 @@ export default function Navigate() {
       getNearestNodeId(
         navData.nodes,
         userCoord,
-        currentFloor,
+        routingFloor,
         destinationId,
         forwardAllowedNodeIds
       );
@@ -1687,35 +1783,17 @@ export default function Navigate() {
     activeStepIndex,
     computeAndStoreRoute,
     confirmedNodeId,
-    currentFloor,
     currentInstructionNodeIds,
     destinationId,
     forwardAllowedNodeIds,
-    hasManualFloorSelection,
     isStarted,
     lastPassedNodeId,
     navData.nodes,
+    routingFloor,
     route.geojson,
     segments,
-    transitionFloorLock,
     userCoord,
   ]);
-
-  const handleFloorPreviewPress = useCallback((previewFloor: number | null) => {
-    if (previewFloor === null) return;
-
-    // tap same floor again = go back to automatic behavior
-    if (transitionFloorLock === previewFloor) {
-      setHasManualFloorSelection(false);
-      setTransitionFloorLock(null);
-      return;
-    }
-
-    // only change the displayed floor
-    setHasManualFloorSelection(true);
-    setTransitionFloorLock(previewFloor);
-  }, [transitionFloorLock]);
-
 
   const handlePreferencePress = useCallback(() => {
     const nextPrefer = prefer === "stairs" ? "elevator" : "stairs";
@@ -1736,6 +1814,57 @@ export default function Navigate() {
     prefer,
     setNavigationPreference,
     start.nodeId,
+  ]);
+
+  const handleFloorPreviewPress = useCallback((previewFloor: number | null) => {
+    if (previewFloor === null) return;
+
+    if (committedFloorLock !== previewFloor) {
+      setCommittedFloorLock(previewFloor);
+    }
+    if (navigationFloor !== previewFloor) {
+      setNavigationFloor(previewFloor);
+    }
+    if (livePosition.floor !== previewFloor) {
+      setLiveFloor(previewFloor);
+    }
+    syncAnchoredNodesToFloor(previewFloor);
+    setActiveStepIndex(0);
+
+    if (hasManualFloorSelection) {
+      setHasManualFloorSelection(false);
+    }
+    if (transitionFloorLock !== null) {
+      setTransitionFloorLock(null);
+    }
+
+    if (isStarted && destinationId) {
+      const rerouteStartId = getEquivalentNodeIdOnFloor(
+        navData.nodes,
+        confirmedNodeId || lastPassedNodeId || effectiveStartNodeId,
+        previewFloor
+      ) || confirmedNodeId || lastPassedNodeId || effectiveStartNodeId;
+
+      computeAndStoreRoute(rerouteStartId, "floor-switch");
+    }
+  }, [
+    committedFloorLock,
+    computeAndStoreRoute,
+    confirmedNodeId,
+    destinationId,
+    effectiveStartNodeId,
+    hasManualFloorSelection,
+    isStarted,
+    lastPassedNodeId,
+    livePosition.floor,
+    navData.nodes,
+    navigationFloor,
+    syncAnchoredNodesToFloor,
+    transitionFloorLock,
+    setActiveStepIndex,
+    setCommittedFloorLock,
+    setLiveFloor,
+    setNavigationFloor,
   ]);
 
   const sheetPanResponder = useMemo(
@@ -1964,7 +2093,7 @@ export default function Navigate() {
           floorplan={navData.renderFloorplan}
           route={
             isStarted
-              ? startedRouteLayers.primary || route.currentFloorGeojson || route.geojson
+              ? startedRouteLayers.primary
               : route.currentFloorGeojson || route.geojson
           }
           secondaryRoute={
@@ -1993,12 +2122,14 @@ export default function Navigate() {
         {showInstructionBanner ? (
           <View style={[styles.instructionBanner, { top: insets.top + 6 }]}>
             <View style={styles.instructionRow}>
-              <MaterialCommunityIcons
-                name={instructionIconName as any}
-                size={42}
-                color={AppPalette.textPrimary}
-                style={styles.instructionIcon}
-              />
+              <View style={styles.instructionIconWrap}>
+                <MaterialCommunityIcons
+                  name={instructionIconName as any}
+                  size={44}
+                  color={AppPalette.textPrimary}
+                  style={styles.instructionIcon}
+                />
+              </View>
               <Text
                 style={styles.instructionTitle}
                 numberOfLines={2}
@@ -2006,12 +2137,12 @@ export default function Navigate() {
                 minimumFontScale={0.72}
                 maxFontSizeMultiplier={1}
               >
-                {nextInstruction.title}
+                {bannerInstruction?.title}
               </Text>
             </View>
-            {nextInstruction?.detail ? (
+            {bannerInstruction?.detail ? (
               <Text style={styles.instructionDetail} numberOfLines={2}>
-                {nextInstruction.detail}
+                {bannerInstruction.detail}
               </Text>
             ) : null}
           </View>
@@ -2175,17 +2306,36 @@ export default function Navigate() {
                     style={[
                       styles.stepItem,
                       index > 0 && styles.stepItemDivider,
+                      index < activeStepIndex && styles.stepItemCompleted,
                       index === displayedInstructionIndex && styles.stepItemActive,
                     ]}
                   >
                     {index === displayedInstructionIndex ? <View style={styles.stepActiveBar} /> : null}
-                    <View style={[styles.stepDot, index === displayedInstructionIndex && styles.stepDotActive]} />
+                    <View
+                      style={[
+                        styles.stepDot,
+                        index < activeStepIndex && styles.stepDotCompleted,
+                        index === displayedInstructionIndex && styles.stepDotActive,
+                      ]}
+                    />
                     <View style={styles.stepTextWrap}>
-                      <Text style={[styles.stepTitle, index === displayedInstructionIndex && styles.stepTitleActive]}>
+                      <Text
+                        style={[
+                          styles.stepTitle,
+                          index < activeStepIndex && styles.stepTitleCompleted,
+                          index === displayedInstructionIndex && styles.stepTitleActive,
+                        ]}
+                      >
                         {step?.title || "Continúe"}
                       </Text>
                       {step?.detail ? (
-                        <Text style={[styles.stepDetail, index === displayedInstructionIndex && styles.stepDetailActive]}>
+                        <Text
+                          style={[
+                            styles.stepDetail,
+                            index < activeStepIndex && styles.stepDetailCompleted,
+                            index === displayedInstructionIndex && styles.stepDetailActive,
+                          ]}
+                        >
                           {step.detail}
                         </Text>
                       ) : null}
@@ -2367,7 +2517,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   instructionRow: { flexDirection: "row", alignItems: "center" },
-  instructionIcon: { marginRight: 10 },
+  instructionIconWrap: {
+    width: 48,
+    height: 48,
+    marginRight: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  instructionIcon: { textAlign: "center" },
   instructionTitle: {
     flex: 1,
     fontSize: 18,
@@ -2587,6 +2744,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "#8EC6D4",
   },
+  stepItemCompleted: { backgroundColor: "#EEF5F8" },
   stepItemActive: { backgroundColor: "#D8EBF2" },
   stepActiveBar: {
     width: 4,
@@ -2602,11 +2760,14 @@ const styles = StyleSheet.create({
     marginTop: 4,
     backgroundColor: AppPalette.primary,
   },
+  stepDotCompleted: { backgroundColor: "#AEBFC8" },
   stepDotActive: { backgroundColor: AppPalette.textSectionTitles },
   stepTextWrap: { flex: 1 },
   stepTitle: { fontSize: 16, fontWeight: "700", color: AppPalette.textPrimary, fontFamily: FONT_TITLE },
+  stepTitleCompleted: { color: "#7A8A92" },
   stepTitleActive: { color: AppPalette.textSectionTitles },
   stepDetail: { fontSize: 13, color: AppPalette.textSectionTitles, marginTop: 2, fontFamily: FONT_BODY },
+  stepDetailCompleted: { color: "#93A4AC" },
   stepDetailActive: { color: AppPalette.textPrimary },
 });
 
