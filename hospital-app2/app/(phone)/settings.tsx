@@ -17,11 +17,11 @@ export default function Settings() {
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
     >
-      <Text style={styles.title}>Settings</Text>
+      <Text style={styles.title}>Ajustes</Text>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Route preference</Text>
-        <Text style={styles.cardText}>Choose the default vertical access mode to use when route options include stairs or elevators.</Text>
+        <Text style={styles.cardTitle}>Preferencia de ruta</Text>
+        <Text style={styles.cardText}>Elija el modo de acceso vertical predeterminado para usar cuando las opciones de ruta incluyan escaleras o ascensores.</Text>
         <View style={styles.row}>
           <Pressable
             style={[styles.option, prefer === "stairs" && styles.optionActive]}
@@ -39,8 +39,8 @@ export default function Settings() {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Guidance sound</Text>
-        <Text style={styles.cardText}>Audio cues can be toggled from navigation too, but this sets the default.</Text>
+        <Text style={styles.cardTitle}>Leer Instrucciones</Text>
+        <Text style={styles.cardText}>Las pistas de audio pueden ser activadas desde la navegación, pero esta opción establece el valor predeterminado.</Text>
         <Pressable
           style={[styles.option, soundEnabled && styles.optionActive, { alignSelf: "flex-start" }]}
           onPress={() => setSoundEnabled(!soundEnabled)}
