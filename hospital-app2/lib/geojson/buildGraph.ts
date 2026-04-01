@@ -21,10 +21,10 @@ type EdgeRec = {
 };
 
 function distanceMetersApprox(a: [number, number], b: [number, number]) {
-  if (COORD_MODE === "local") {
-    const dx = Math.abs(a[0] - b[0]);
-    const dy = Math.abs(a[1] - b[1]);
-    return dx + dy;
+    if (COORD_MODE === "local") {
+    const dx = a[0] - b[0];
+    const dy = a[1] - b[1];
+    return Math.sqrt(dx * dx + dy * dy);
   }
 
   const avgLatRad = (((a[1] + b[1]) / 2) * Math.PI) / 180;
