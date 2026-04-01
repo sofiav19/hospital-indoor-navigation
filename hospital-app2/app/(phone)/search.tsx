@@ -4,6 +4,8 @@ import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavStore } from "../../store/navStore";
 import { AppPalette } from "../../constants/theme";
+import { computeRoute } from "../../lib/route/routeEngine";
+import { trackEvent } from "../../lib/telemetry";
 import {
   DIRECTORY_CATEGORIES,
   HOSPITAL_DIRECTORY,
@@ -17,10 +19,22 @@ function getBuildingLabel(destinationNodeId: string) {
   return "Edificio General";
 }
 
+function distanceMeters(a: [number, number], b: [number, number]) {
+  const dx = a[0] - b[0];
+  const dy = a[1] - b[1];
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
 export default function Search() {
   const navData = useNavStore((s) => s.navData);
+  const start = useNavStore((s) => s.start);
+  const livePosition = useNavStore((s) => s.livePosition);
+  const postNavStartOverrideId = useNavStore((s) => s.postNavStartOverrideId);
   const setDestinationId = useNavStore((s) => s.setDestinationId);
+  const setStartNode = useNavStore((s) => s.setStartNode);
   const setNavigationStarted = useNavStore((s) => s.setNavigationStarted);
+  const recentDestinationIds = useNavStore((s) => s.navigationUi.recentDestinationIds);
+  const prefer = useNavStore((s) => s.navigationUi.prefer);
   const [query, setQuery] = useState("");
   const [focusedCategory, setFocusedCategory] = useState<DirectoryCategoryKey | null>(null);
 
@@ -34,17 +48,104 @@ export default function Search() {
   }, [availableNodeIds]);
 
   const availableCategories = useMemo(() => {
-    const categoriesWithData = new Set(availableEntries.map((entry) => entry.category));
+    const categoriesWithData = new Set<DirectoryCategoryKey>(["recent"]);
+    availableEntries.forEach((entry) => categoriesWithData.add(entry.category));
     return DIRECTORY_CATEGORIES.filter((category) => categoriesWithData.has(category.key));
   }, [availableEntries]);
 
   const browseCategories = useMemo(() => {
-    const preferredOrder: DirectoryCategoryKey[] = ["specialties", "diagnostics", "entrances", "services"];
+    const preferredOrder: DirectoryCategoryKey[] = ["specialties", "diagnostics", "entrances", "services", "recent"];
     const categoryMap = new Map(availableCategories.map((category) => [category.key, category]));
     return preferredOrder
       .map((key) => categoryMap.get(key))
       .filter((category): category is NonNullable<typeof category> => Boolean(category));
   }, [availableCategories]);
+
+  const recentEntries = useMemo(() => {
+    const entriesByDestinationId = new Map(
+      availableEntries.map((entry) => [entry.destinationNodeId, entry])
+    );
+
+    return recentDestinationIds
+      .map((destinationId) => entriesByDestinationId.get(destinationId))
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+  }, [availableEntries, recentDestinationIds]);
+
+  const entranceNodeIds = useMemo(() => {
+    return availableEntries
+      .filter((entry) => entry.category === "entrances")
+      .map((entry) => entry.destinationNodeId);
+  }, [availableEntries]);
+
+  const getBestEntranceId = (destinationNodeId: string) => {
+    if (!navData.nodes || !navData.edges || !entranceNodeIds.length) return null;
+
+    let bestEntranceId: string | null = null;
+    let bestScore = Infinity;
+    const evaluations: {
+      entranceNodeId: string;
+      ok: boolean;
+      reason: string | null;
+      approachMeters: number | null;
+      routeMeters: number | null;
+      totalScore: number | null;
+    }[] = [];
+
+    for (const entranceNodeId of entranceNodeIds) {
+      const entranceFeature =
+        navData.nodes.features?.find((feature: any) => feature.properties?.id === entranceNodeId) || null;
+      const entranceCoords = entranceFeature?.geometry?.coordinates as [number, number] | undefined;
+      const result = computeRoute(navData.nodes, navData.edges, entranceNodeId, destinationNodeId, { prefer });
+
+      const approachMeters =
+        livePosition.coords && Array.isArray(entranceCoords)
+          ? distanceMeters(livePosition.coords, entranceCoords)
+          : 0;
+
+      if (!result.ok) {
+        evaluations.push({
+          entranceNodeId,
+          ok: false,
+          reason: result.reason || null,
+          approachMeters: Number.isFinite(approachMeters) ? Math.round(approachMeters) : null,
+          routeMeters: null,
+          totalScore: null,
+        });
+        continue;
+      }
+
+      const routeMeters = result.summary?.totalMeters ?? Infinity;
+      const totalScore = approachMeters + routeMeters;
+      evaluations.push({
+        entranceNodeId,
+        ok: true,
+        reason: null,
+        approachMeters: Number.isFinite(approachMeters) ? Math.round(approachMeters) : null,
+        routeMeters: Number.isFinite(routeMeters) ? routeMeters : null,
+        totalScore: Number.isFinite(totalScore) ? Math.round(totalScore) : null,
+      });
+
+      if (totalScore < bestScore) {
+        bestScore = totalScore;
+        bestEntranceId = entranceNodeId;
+      }
+    }
+
+    console.log("[EntrancePicker] evaluated entrances", {
+      destinationNodeId,
+      prefer,
+      livePositionProvider: livePosition.provider,
+      liveCoords: livePosition.coords,
+      startNodeId: start.nodeId,
+      postNavStartOverrideId,
+      evaluations,
+      chosenEntranceId: bestEntranceId,
+      chosenScore: Number.isFinite(bestScore) ? Math.round(bestScore) : null,
+      note: "Current implementation compares current-position-to-entrance distance plus entrance-to-destination route length.",
+    });
+
+    return bestEntranceId;
+  };
 
   const topDestinations = useMemo(() => {
     const categoryOrder: DirectoryCategoryKey[] = ["specialties", "diagnostics", "entrances", "services"];
@@ -78,9 +179,7 @@ export default function Search() {
         if (!next) continue;
 
         const dedupeKey = `${next.category}-${normalizeSearchValue(next.name)}`;
-        if (seenByName.has(dedupeKey)) {
-          continue;
-        }
+        if (seenByName.has(dedupeKey)) continue;
 
         seenByName.add(dedupeKey);
         mixed.push(next);
@@ -108,22 +207,36 @@ export default function Search() {
         return topDestinations;
       }
 
+      if (activeCategoryKey === "recent") {
+        return recentEntries;
+      }
+
       return availableEntries.filter((entry) => entry.category === activeCategoryKey);
+    }
+
+    if (activeCategoryKey === "recent") {
+      return recentEntries.filter((entry) => {
+        const haystack = [entry.name, entry.doctor || "", entry.roomNumber || "", entry.street || "", `planta ${entry.floor}`, ...entry.keywords]
+          .map((value) => normalizeSearchValue(value))
+          .join(" ");
+
+        return haystack.includes(normalizedQuery);
+      });
     }
 
     return availableEntries.filter((entry) => {
       const inCategory = focusedCategory ? entry.category === focusedCategory : true;
       if (!inCategory) return false;
 
-      const haystack = [entry.name, entry.doctor || "", entry.street || "", `planta ${entry.floor}`, ...entry.keywords]
+      const haystack = [entry.name, entry.doctor || "", entry.roomNumber || "", entry.street || "", `planta ${entry.floor}`, ...entry.keywords]
         .map((value) => normalizeSearchValue(value))
         .join(" ");
 
       return haystack.includes(normalizedQuery);
     });
-  }, [availableEntries, browseCategories, focusedCategory, query, topDestinations]);
+  }, [availableEntries, browseCategories, focusedCategory, query, recentEntries, topDestinations]);
 
-  if (!navData.isLoaded) return <View style={styles.page}><Text>Loading…</Text></View>;
+  if (!navData.isLoaded) return <View style={styles.page}><Text>Loading...</Text></View>;
   if (navData.validationErrors.length) {
     return (
       <View style={styles.page}>
@@ -213,6 +326,30 @@ export default function Search() {
             style={styles.item}
             onPress={() => {
               setNavigationStarted(false);
+              console.log("[EntrancePicker] destination selected", {
+                destinationNodeId: item.destinationNodeId,
+                livePositionProvider: livePosition.provider,
+                liveCoords: livePosition.coords,
+                startNodeId: start.nodeId,
+                postNavStartOverrideId,
+              });
+              const bestEntranceId = getBestEntranceId(item.destinationNodeId);
+              if (bestEntranceId) {
+                console.log("[EntrancePicker] applying entrance start node", {
+                  destinationNodeId: item.destinationNodeId,
+                  bestEntranceId,
+                });
+                setStartNode(bestEntranceId);
+              }
+              trackEvent("navigation.destination_selected", {
+                destinationId: item.destinationNodeId,
+                destinationName: item.name,
+                category: item.category,
+                roomNumber: item.roomNumber || null,
+                recommendedEntranceId: bestEntranceId,
+                livePositionProvider: livePosition.provider,
+                liveCoords: livePosition.coords,
+              });
               setDestinationId(item.destinationNodeId);
               router.push("/navigate");
             }}
@@ -221,11 +358,17 @@ export default function Search() {
             <Text style={styles.itemMeta}>
               {item.category === "entrances"
                 ? `${item.street || getBuildingLabel(item.destinationNodeId)} · Planta ${item.floor}`
-                : `${getBuildingLabel(item.destinationNodeId)} · Planta ${item.floor}${item.doctor ? ` · ${item.doctor}` : ""}`}
+                : `${getBuildingLabel(item.destinationNodeId)} · Planta ${item.floor}${item.roomNumber ? ` · Sala ${item.roomNumber}` : ""}${item.doctor ? ` · ${item.doctor}` : ""}`}
             </Text>
           </Pressable>
         )}
-        ListEmptyComponent={<Text style={styles.emptyText}>No hay resultados para esa busqueda.</Text>}
+        ListEmptyComponent={
+          <Text style={styles.emptyText}>
+            {focusedCategory === "recent"
+              ? "Todavia no hay destinos recientes."
+              : "No hay resultados para esa busqueda."}
+          </Text>
+        }
       />
     </View>
   );

@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, Pressable, ScrollView, StyleSheet, TextInput, PanResponder, Platform } from "react-native";
+import { View, Text, Pressable, ScrollView, StyleSheet, TextInput, PanResponder, Platform, Linking } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import * as Speech from "expo-speech";
 import { useNavStore } from "../../store/navStore";
 import IndoorMap from "../../components/map/IndoorMap";
 import { computeRoute } from "../../lib/route/routeEngine";
@@ -10,6 +11,7 @@ import { buildDetailedInstruction as buildSharedDetailedInstruction } from "../.
 import { HOSPITAL_DIRECTORY, normalizeSearchValue } from "../../lib/hospitalDirectory";
 import { AppPalette } from "../../constants/theme";
 import { projectCoordsForMap, projectGeoJSONForMap } from "../../lib/coords/localToLngLat";
+import { trackEvent } from "../../lib/telemetry";
 
 let LocationImpl: any = null;
 
@@ -32,6 +34,7 @@ const SEGMENT_TUBE_RADIUS_METERS = 0.9;
 const OFF_ROUTE_RADIUS_METERS = 2.1;
 const ARRIVAL_COMPLETE_RADIUS_METERS = 1.0;
 const TRANSITION_ZONE_RADIUS_METERS = 2.0;
+const OUTDOOR_HANDOFF_THRESHOLD_METERS = 12;
 const FONT_TITLE = Platform.select({ ios: "SF Pro Display", default: "sans-serif-medium" });
 const FONT_BODY = Platform.select({ ios: "Inter", default: "sans-serif" });
 
@@ -601,6 +604,7 @@ export default function Navigate() {
   const [showSteps, setShowSteps] = useState(false);
   const [showStartDropdown, setShowStartDropdown] = useState(false);
   const [showCurrentLocationFloorPrompt, setShowCurrentLocationFloorPrompt] = useState(false);
+  const [showOutdoorHandoffPopup, setShowOutdoorHandoffPopup] = useState(true);
   const [startQuery, setStartQuery] = useState("");
   const [confirmedNodeId, setConfirmedNodeId] = useState<string | null>(null);
   const [lastPassedNodeId, setLastPassedNodeId] = useState<string | null>(null);
@@ -616,6 +620,7 @@ export default function Navigate() {
   const [smoothedLiveHeading, setSmoothedLiveHeading] = useState<number | null>(null);
   const [recenterHeading, setRecenterHeading] = useState(0);
   const [recenterRequestedAt, setRecenterRequestedAt] = useState(0);
+  const lastSpokenInstructionKeyRef = useRef<string | null>(null);
 
   const insets = useSafeAreaInsets();
 
@@ -732,6 +737,65 @@ export default function Navigate() {
     () => navData.nodes?.features?.find((item: any) => item.properties?.id === destinationId) || null,
     [destinationId, navData.nodes]
   );
+
+  const destinationDirectoryEntry = useMemo(
+    () => HOSPITAL_DIRECTORY.find((entry) => entry.destinationNodeId === destinationId) || null,
+    [destinationId]
+  );
+
+  const activeEntranceEntry = useMemo(
+    () => HOSPITAL_DIRECTORY.find((entry) => entry.destinationNodeId === effectiveStartNodeId && entry.category === "entrances") || null,
+    [effectiveStartNodeId]
+  );
+
+  const distanceToNearestEntrance = useMemo(() => {
+    if (!livePosition.coords) return null;
+
+    const entranceCoords = (navData.nodes?.features || [])
+      .filter((feature: any) => feature.properties?.role === "doors")
+      .map((feature: any) => feature.geometry?.coordinates)
+      .filter((coords: any): coords is [number, number] => Array.isArray(coords) && coords.length >= 2);
+
+    if (!entranceCoords.length) return null;
+
+    return entranceCoords.reduce((best: number, coords: [number, number]) => {
+      return Math.min(best, distanceMeters(livePosition.coords as [number, number], coords));
+    }, Infinity);
+  }, [livePosition.coords, navData.nodes]);
+
+  const shouldShowOutdoorHandoff = useMemo(() => {
+    return Boolean(
+      !isStarted &&
+      activeEntranceEntry?.street &&
+      livePosition.coords &&
+      typeof distanceToNearestEntrance === "number" &&
+      Number.isFinite(distanceToNearestEntrance) &&
+      distanceToNearestEntrance > OUTDOOR_HANDOFF_THRESHOLD_METERS
+    );
+  }, [activeEntranceEntry?.street, distanceToNearestEntrance, isStarted, livePosition.coords]);
+
+  useEffect(() => {
+    if (shouldShowOutdoorHandoff) {
+      setShowOutdoorHandoffPopup(true);
+    }
+  }, [shouldShowOutdoorHandoff, destinationId]);
+
+  const handleOpenGoogleMaps = useCallback(() => {
+    if (!activeEntranceEntry) return;
+    trackEvent("handoff.google_maps_opened", {
+      entranceId: activeEntranceEntry.destinationNodeId,
+      entranceName: activeEntranceEntry.name,
+      street: activeEntranceEntry.street || null,
+      destinationId,
+    });
+    const query = encodeURIComponent(
+      `${activeEntranceEntry.name}, ${activeEntranceEntry.street}, Hospital Universitario Santa Teresa`
+    );
+    const url = `https://www.google.com/maps/search/?api=1&query=${query}`;
+    Linking.openURL(url).catch((error) => {
+      console.warn("[OutdoorHandoff] Failed to open Google Maps", error);
+    });
+  }, [activeEntranceEntry, destinationId]);
 
   const startNodeOptions = useMemo(() => {
     return HOSPITAL_DIRECTORY
@@ -1179,6 +1243,25 @@ export default function Navigate() {
   ]);
   const instructionIconName = getInstructionIconName(bannerInstruction?.maneuver);
 
+  useEffect(() => {
+    if (!isStarted || !soundEnabled || !bannerInstruction?.title) return;
+
+    const instructionKey = `${displayedInstructionIndex}:${bannerInstruction.title}:${bannerInstruction.detail || ""}`;
+    if (lastSpokenInstructionKeyRef.current === instructionKey) return;
+
+    lastSpokenInstructionKeyRef.current = instructionKey;
+    Speech.stop();
+    Speech.speak(
+      bannerInstruction.detail
+        ? `${bannerInstruction.title}. ${bannerInstruction.detail}`
+        : bannerInstruction.title,
+      {
+        language: "es-ES",
+        rate: 0.95,
+      }
+    );
+  }, [bannerInstruction?.detail, bannerInstruction?.title, displayedInstructionIndex, isStarted, soundEnabled]);
+
   const visibleFloorOptions = useMemo(() => {
     if (!isStarted) return [];
     if (transitionZoneOptions.length > 1) {
@@ -1231,6 +1314,13 @@ export default function Navigate() {
       const result = computeRoute(navData.nodes, navData.edges, startId, destinationId, { prefer: effectivePrefer });
 
       if (!result.ok) {
+        trackEvent("route.compute_failed", {
+          startId,
+          destinationId,
+          prefer: effectivePrefer,
+          reason: reason || result.reason || null,
+          routeError: result.reason || null,
+        });
         setRoute({
           ok: false,
           geojson: null,
@@ -1251,6 +1341,16 @@ export default function Navigate() {
         routeNodesGeojson: projectGeoJSONForMap(result.routeNodesGeojson),
         summary: result.summary,
         reason,
+      });
+
+      trackEvent("route.computed", {
+        startId,
+        destinationId,
+        prefer: effectivePrefer,
+        reason: reason || "initial",
+        totalMeters: result.summary?.totalMeters ?? null,
+        etaMinutes: result.summary?.etaMinutes ?? null,
+        destinationFloor: result.summary?.destinationFloor ?? null,
       });
 
       setActiveStepIndex(0);
@@ -1801,6 +1901,12 @@ export default function Navigate() {
     if (rerouteStartId !== lastPassedNodeId) setLastPassedNodeId(rerouteStartId);
 
     setShowRerouteNotice(true);
+    trackEvent("navigation.reroute_triggered", {
+      destinationId,
+      rerouteStartId,
+      activeStepIndex,
+      currentFloor: routingFloor,
+    });
     if (rerouteNoticeTimeoutRef.current) clearTimeout(rerouteNoticeTimeoutRef.current);
     rerouteNoticeTimeoutRef.current = setTimeout(() => {
       setShowRerouteNotice(false);
@@ -2098,7 +2204,7 @@ export default function Navigate() {
               </Text>
               <Text style={styles.cardMeta}>
                 {route.ok
-                  ? `Planta ${route.summary?.destinationFloor ?? destinationFeature?.properties?.floor ?? "-"} | ${route.summary?.etaMinutes ?? "?"} min | ${route.summary?.totalMeters ?? "?"} m`
+                  ? `Planta ${route.summary?.destinationFloor ?? destinationFeature?.properties?.floor ?? "-"}${destinationDirectoryEntry?.roomNumber ? ` | Sala ${destinationDirectoryEntry.roomNumber}` : ""} | ${route.summary?.etaMinutes ?? "?"} min | ${route.summary?.totalMeters ?? "?"} m`
                   : route.reason
                     ? `Error en la ruta: ${route.reason}`
                     : "Preparando ruta"}
@@ -2106,6 +2212,30 @@ export default function Navigate() {
             </View>
             <Ionicons name="pencil" size={24} color={AppPalette.textPrimary} />
           </Pressable>
+
+        </View>
+      ) : null}
+
+      {!isStarted && shouldShowOutdoorHandoff && showOutdoorHandoffPopup ? (
+        <View style={[styles.popupWrap, { top: Math.max(insets.top, 14) + 8 }]}>
+          <View style={styles.popupCard}>
+            <Pressable
+              style={styles.popupClose}
+              onPress={() => setShowOutdoorHandoffPopup(false)}
+            >
+              <Ionicons name="close" size={20} color={AppPalette.textPrimary} />
+            </Pressable>
+            <Text style={styles.popupTitle}>Fuera del hospital</Text>
+            <Text style={styles.popupBody}>
+              No se ha detectado localizacion interior todavia. Algunas capacidades pueden estar limitadas hasta entrar al hospital.
+            </Text>
+            <Text style={styles.popupBody}>
+              Entrada recomendada: {activeEntranceEntry?.name} ({activeEntranceEntry?.street}).
+            </Text>
+            <Pressable style={styles.popupButton} onPress={handleOpenGoogleMaps}>
+              <Text style={styles.popupButtonText}>Abrir en Google Maps</Text>
+            </Pressable>
+          </View>
         </View>
       ) : null}
 
@@ -2277,6 +2407,12 @@ export default function Navigate() {
               if (isStarted) {
                 setShowSteps(false);
                 setNavigationStarted(false);
+                trackEvent("navigation.completed", {
+                  destinationId,
+                  totalMeters: route.summary?.totalMeters ?? null,
+                  etaMinutes: route.summary?.etaMinutes ?? null,
+                  activeStepIndex,
+                });
                 if (destinationId) {
                   router.replace(`/post-navigation?completedDestinationId=${encodeURIComponent(destinationId)}`);
                 }
@@ -2288,6 +2424,13 @@ export default function Navigate() {
               }
               setActiveStepIndex(0);
               setNavigationStarted(true);
+              trackEvent("navigation.started", {
+                startId: postNavStartOverrideId || effectiveStartNodeId,
+                destinationId,
+                totalMeters: route.summary?.totalMeters ?? null,
+                etaMinutes: route.summary?.etaMinutes ?? null,
+                prefer,
+              });
               recenterToUser();
             }}
           >
@@ -2417,6 +2560,63 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 20, fontWeight: "700", color: AppPalette.textPrimary, fontFamily: FONT_TITLE },
   cardMeta: { fontSize: 13, color: AppPalette.textPrimary, marginTop: 2, fontFamily: FONT_BODY },
   cardEdit: { fontSize: 14, fontWeight: "700", color: AppPalette.primary },
+  popupWrap: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    zIndex: 20,
+  },
+  popupCard: {
+    borderRadius: 18,
+    backgroundColor: "#F3E8B7",
+    borderWidth: 2,
+    borderColor: "#C48C2E",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 10,
+    shadowColor: "#000000",
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  popupClose: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    width: 28,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.55)",
+  },
+  popupTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: AppPalette.textPrimary,
+    fontFamily: FONT_TITLE,
+    paddingRight: 28,
+  },
+  popupBody: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: AppPalette.textPrimary,
+    fontFamily: FONT_BODY,
+  },
+  popupButton: {
+    alignSelf: "flex-start",
+    borderRadius: 12,
+    backgroundColor: AppPalette.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  popupButtonText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: AppPalette.background,
+    fontFamily: FONT_BODY,
+  },
   startDropdown: {
     borderRadius: 16,
     backgroundColor: AppPalette.surfaceAlt,

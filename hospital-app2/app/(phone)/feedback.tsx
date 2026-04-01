@@ -4,6 +4,7 @@ import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppPalette } from "../../constants/theme";
+import { trackEvent } from "../../lib/telemetry";
 
 const PROBLEM_TYPES = [
   { id: "direction", label: "Dirección Incorrecta" },
@@ -59,7 +60,7 @@ export default function Feedback() {
       };
 
       // Aquí puedes enviar los datos a un servidor
-      console.log("Feedback enviado:", feedbackData);
+      await trackEvent("feedback.submitted", feedbackData);
 
       Alert.alert("Éxito", "Gracias por tu feedback. Tu opinión nos ayuda a mejorar.", [
         {

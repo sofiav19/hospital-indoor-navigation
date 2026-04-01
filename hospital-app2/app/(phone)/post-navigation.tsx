@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppPalette } from "../../constants/theme";
 import { useNavStore } from "../../store/navStore";
+import { trackEvent } from "../../lib/telemetry";
 import {
   HOSPITAL_DIRECTORY,
   normalizeSearchValue,
@@ -105,11 +106,20 @@ export default function PostNavigation() {
 
   const handleAnotherRoute = () => {
     prepareDefaultStart();
+    trackEvent("navigation.new_route_requested", {
+      previousDestinationId: previousGoalId,
+      source: "completion_screen",
+    });
     router.replace("/");
   };
 
   const handleQuickDestination = (destinationNodeId: string) => {
     prepareDefaultStart();
+    trackEvent("navigation.quick_destination_selected", {
+      previousDestinationId: previousGoalId,
+      nextDestinationId: destinationNodeId,
+      source: "completion_screen",
+    });
     setDestinationId(destinationNodeId);
     router.replace("/navigate");
   };

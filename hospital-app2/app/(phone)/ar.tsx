@@ -1,7 +1,8 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { AppState, Pressable, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import * as Speech from "expo-speech";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavStore } from "../../store/navStore";
 import { computeRoute } from "../../lib/route/routeEngine";
@@ -191,6 +192,7 @@ export default function ArNavigation() {
   const [showHeadingBlocker, setShowHeadingBlocker] = useState(true);
   const [showHeadingGraceHint, setShowHeadingGraceHint] = useState(false);
   const [showHeadingReady, setShowHeadingReady] = useState(false);
+  const lastSpokenInstructionKeyRef = React.useRef<string | null>(null);
 
   const navData = useNavStore((s) => s.navData);
   const start = useNavStore((s) => s.start);
@@ -510,16 +512,35 @@ export default function ArNavigation() {
 
   const directionCaption = useMemo(() => {
     if (typeof activeHeading !== "number" || typeof targetHeading !== "number") {
-      return "Apunte el telÃ©fono hacia la ruta";
+      return "Apunte el telefono hacia la ruta";
     }
 
     const absError = Math.abs(headingError);
-    if (absError < 12) return "EstÃ¡ alineado";
+    if (absError < 12) return "Esta alineado";
     if (headingError < 0) return absError > 45 ? "Gire a la izquierda" : "Leve giro a la izquierda";
     return absError > 45 ? "Gire a la derecha" : "Leve giro a la derecha";
   }, [activeHeading, headingError, targetHeading]);
 
   const bannerIconName = useMemo(() => getBannerIconName(arHint), [arHint]);
+
+  useEffect(() => {
+    if (!isStarted || !soundEnabled || !bannerInstruction?.title) return;
+
+    const instructionKey = `${displayedInstructionIndex}:${bannerInstruction.title}:${bannerInstruction.detail || ""}`;
+    if (lastSpokenInstructionKeyRef.current === instructionKey) return;
+
+    lastSpokenInstructionKeyRef.current = instructionKey;
+    Speech.stop();
+    Speech.speak(
+      bannerInstruction.detail
+        ? `${bannerInstruction.title}. ${bannerInstruction.detail}`
+        : bannerInstruction.title,
+      {
+        language: "es-ES",
+        rate: 0.95,
+      }
+    );
+  }, [bannerInstruction?.detail, bannerInstruction?.title, displayedInstructionIndex, isStarted, soundEnabled]);
 
   useEffect(() => {
     if (hasUsableHeading) {
