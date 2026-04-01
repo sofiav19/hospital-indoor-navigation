@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, Pressable, ScrollView, StyleSheet, TextInput, PanResponder, Platform, Linking } from "react-native";
+import { View, Text, Pressable, ScrollView, StyleSheet, TextInput, PanResponder, Platform, Linking, Alert } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -12,6 +12,7 @@ import { HOSPITAL_DIRECTORY, normalizeSearchValue } from "../../lib/hospitalDire
 import { AppPalette, useAppAppearance } from "../../constants/theme";
 import { projectCoordsForMap, projectGeoJSONForMap } from "../../lib/coords/localToLngLat";
 import { trackEvent } from "../../lib/telemetry";
+import { LOCATION_PRIVACY_NOTE } from "../../lib/appMetadata";
 
 let LocationImpl: any = null;
 
@@ -662,6 +663,7 @@ export default function Navigate() {
   const lastFollowRecenterAtRef = useRef(0);
   const lastFollowUserCoordRef = useRef<[number, number] | null>(null);
   const lastFollowStepIndexRef = useRef(-1);
+  const hasShownLocationPrivacyNoteRef = useRef(false);
 
   const effectiveStartNodeId = postNavStartOverrideId || start.nodeId || "n_hospital_entrance_f0";
 
@@ -1543,8 +1545,24 @@ export default function Navigate() {
         let granted = currentPermission?.granted === true;
 
         if (!granted) {
-          const requestedPermission = await LocationImpl.requestForegroundPermissionsAsync();
-          granted = requestedPermission?.granted === true;
+          if (hasShownLocationPrivacyNoteRef.current) {
+            const requestedPermission = await LocationImpl.requestForegroundPermissionsAsync();
+            granted = requestedPermission?.granted === true;
+          } else {
+            hasShownLocationPrivacyNoteRef.current = true;
+            granted = await new Promise<boolean>((resolve) => {
+              Alert.alert("Nota de privacidad", LOCATION_PRIVACY_NOTE, [
+                { text: "Ahora no", style: "cancel", onPress: () => resolve(false) },
+                {
+                  text: "Continuar",
+                  onPress: async () => {
+                    const requestedPermission = await LocationImpl.requestForegroundPermissionsAsync();
+                    resolve(requestedPermission?.granted === true);
+                  },
+                },
+              ]);
+            });
+          }
         }
 
         if (!isMounted || !granted) return;

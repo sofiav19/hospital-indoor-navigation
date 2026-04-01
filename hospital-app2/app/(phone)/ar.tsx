@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { AppState, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, AppState, Pressable, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Speech from "expo-speech";
@@ -9,6 +9,7 @@ import { computeRoute } from "../../lib/route/routeEngine";
 import { buildDetailedInstruction } from "../../lib/route/navigationInstructions";
 import { AppPalette, useAppAppearance } from "../../constants/theme";
 import { projectGeoJSONForMap } from "../../lib/coords/localToLngLat";
+import { LOCATION_PRIVACY_NOTE } from "../../lib/appMetadata";
 
 let CameraViewImpl: any = null;
 let useCameraPermissionsImpl: any = null;
@@ -198,6 +199,7 @@ export default function ArNavigation() {
   const [showHeadingGraceHint, setShowHeadingGraceHint] = useState(false);
   const [showHeadingReady, setShowHeadingReady] = useState(false);
   const lastSpokenInstructionKeyRef = React.useRef<string | null>(null);
+  const hasShownLocationPrivacyNoteRef = React.useRef(false);
 
   const navData = useNavStore((s) => s.navData);
   const start = useNavStore((s) => s.start);
@@ -252,8 +254,24 @@ export default function ArNavigation() {
         let granted = currentPermission?.granted === true;
 
         if (!granted) {
-          const requestedPermission = await LocationImpl.requestForegroundPermissionsAsync();
-          granted = requestedPermission?.granted === true;
+          if (hasShownLocationPrivacyNoteRef.current) {
+            const requestedPermission = await LocationImpl.requestForegroundPermissionsAsync();
+            granted = requestedPermission?.granted === true;
+          } else {
+            hasShownLocationPrivacyNoteRef.current = true;
+            granted = await new Promise<boolean>((resolve) => {
+              Alert.alert("Nota de privacidad", LOCATION_PRIVACY_NOTE, [
+                { text: "Ahora no", style: "cancel", onPress: () => resolve(false) },
+                {
+                  text: "Continuar",
+                  onPress: async () => {
+                    const requestedPermission = await LocationImpl.requestForegroundPermissionsAsync();
+                    resolve(requestedPermission?.granted === true);
+                  },
+                },
+              ]);
+            });
+          }
         }
 
         if (!isMounted) return;
