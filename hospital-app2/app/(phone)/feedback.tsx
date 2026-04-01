@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View, Alert } from 
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { AppPalette } from "../../constants/theme";
+import { useAppAppearance } from "../../constants/theme";
 import { trackEvent } from "../../lib/telemetry";
 
 const PROBLEM_TYPES = [
@@ -16,6 +16,7 @@ const PROBLEM_TYPES = [
 
 export default function Feedback() {
   const insets = useSafeAreaInsets();
+  const { palette, scaleFont, scaleLineHeight } = useAppAppearance();
   const [rating, setRating] = useState(0);
   const [selectedProblems, setSelectedProblems] = useState<string[]>([]);
   const [location, setLocation] = useState("");
@@ -68,7 +69,7 @@ export default function Feedback() {
           onPress: () => router.back(),
         },
       ]);
-    } catch (error) {
+    } catch {
       Alert.alert("Error", "No se pudo enviar el feedback. Intenta de nuevo.");
     } finally {
       setIsSubmitting(false);
@@ -76,9 +77,14 @@ export default function Feedback() {
   };
 
   return (
-    <View style={styles.screen}>
-      <View style={[styles.sheetWrap, { marginTop: insets.top + 8, marginBottom: 12 }]}>
-        <View style={styles.sheet}>
+    <View style={[styles.screen, { backgroundColor: palette.primary }]}>
+      <View
+        style={[
+          styles.sheetWrap,
+          { marginTop: insets.top + 8, marginBottom: 12, borderColor: palette.primary },
+        ]}
+      >
+        <View style={[styles.sheet, { backgroundColor: palette.surfaceAlt }]}>
           <ScrollView
             style={styles.scroll}
             bounces={false}
@@ -88,19 +94,41 @@ export default function Feedback() {
             contentContainerStyle={styles.sheetContent}
           >
             <View style={styles.headerRow}>
-              <Text style={styles.title}>Feedback</Text>
+              <Text
+                style={[
+                  styles.title,
+                  {
+                    fontSize: scaleFont(24),
+                    lineHeight: scaleLineHeight(30),
+                    color: palette.primary,
+                  },
+                ]}
+              >
+                Feedback
+              </Text>
               <Pressable style={styles.closeButton} onPress={() => router.back()}>
-                <Ionicons name="close" size={38} color={AppPalette.textPrimary} />
+                <Ionicons name="close" size={38} color={palette.textPrimary} />
               </Pressable>
             </View>
 
-            <Text style={styles.description}>
+            <Text
+              style={[
+                styles.description,
+                {
+                  fontSize: scaleFont(15),
+                  lineHeight: scaleLineHeight(22),
+                  color: palette.textPrimary,
+                },
+              ]}
+            >
               Su opinión es anónima y nos ayuda a mejorar la experiencia.
             </Text>
 
             {/* Valoración General */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Valoración General</Text>
+              <Text style={[styles.sectionTitle, { fontSize: scaleFont(16), color: palette.textPrimary }]}>
+                Valoración General
+              </Text>
               <View style={styles.starsRow}>
                 {[1, 2, 3, 4, 5].map((star) => (
                   <Pressable
@@ -120,34 +148,47 @@ export default function Feedback() {
 
             {/* Tipo de Problema */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Tipo de Problema</Text>
+              <Text style={[styles.sectionTitle, { fontSize: scaleFont(16), color: palette.textPrimary }]}>
+                Tipo de Problema
+              </Text>
               {PROBLEM_TYPES.map((problem) => (
                 <Pressable
                   key={problem.id}
-                  style={styles.checkboxRow}
+                  style={[
+                    styles.checkboxRow,
+                    { backgroundColor: palette.background, borderColor: highContrastBorderColor(palette.lines) },
+                  ]}
                   onPress={() => toggleProblem(problem.id)}
                 >
                   <View
                     style={[
                       styles.checkbox,
-                      selectedProblems.includes(problem.id) && styles.checkboxActive,
+                      { borderColor: highContrastBorderColor("rgba(29, 27, 32, 0.3)") },
+                      selectedProblems.includes(problem.id) && {
+                        borderColor: palette.primary,
+                        backgroundColor: palette.lists,
+                      },
                     ]}
                   >
                     {selectedProblems.includes(problem.id) && (
-                      <MaterialCommunityIcons name="check" size={16} color={AppPalette.primary} />
+                      <MaterialCommunityIcons name="check" size={16} color={palette.primary} />
                     )}
                   </View>
-                  <Text style={styles.checkboxLabel}>{problem.label}</Text>
+                  <Text style={[styles.checkboxLabel, { fontSize: scaleFont(15), color: palette.textPrimary }]}>
+                    {problem.label}
+                  </Text>
                 </Pressable>
               ))}
             </View>
 
             {/* Ubicación */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Ubicación (opcional)</Text>
-              <View style={styles.inputContainer}>
+              <Text style={[styles.sectionTitle, { fontSize: scaleFont(16), color: palette.textPrimary }]}>
+                Ubicación (opcional)
+              </Text>
+              <View style={[styles.inputContainer, { backgroundColor: palette.background }]}>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, { fontSize: scaleFont(15), color: palette.textPrimary }]}
                   placeholder="Sala, Planta o Área"
                   placeholderTextColor="rgba(29, 27, 32, 0.5)"
                   value={location}
@@ -164,10 +205,12 @@ export default function Feedback() {
 
             {/* Descripción */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Descripción</Text>
-              <View style={styles.inputContainer}>
+              <Text style={[styles.sectionTitle, { fontSize: scaleFont(16), color: palette.textPrimary }]}>
+                Descripción
+              </Text>
+              <View style={[styles.inputContainer, { backgroundColor: palette.background }]}>
                 <TextInput
-                  style={[styles.input, styles.textArea]}
+                  style={[styles.input, styles.textArea, { fontSize: scaleFont(15), color: palette.textPrimary }]}
                   placeholder="Describe el problema que encontró"
                   placeholderTextColor="rgba(29, 27, 32, 0.5)"
                   value={description}
@@ -186,16 +229,22 @@ export default function Feedback() {
                   </Pressable>
                 )}
               </View>
-              <Text style={styles.charCount}>{description.length}/500</Text>
+              <Text style={[styles.charCount, { fontSize: scaleFont(12), color: palette.textPrimary }]}>
+                {description.length}/500
+              </Text>
             </View>
 
             {/* Botón Enviar */}
             <Pressable
-              style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
+              style={[
+                styles.submitButton,
+                { backgroundColor: palette.primary },
+                isSubmitting && styles.submitButtonDisabled,
+              ]}
               onPress={handleSubmit}
               disabled={isSubmitting}
             >
-              <Text style={styles.submitButtonText}>
+              <Text style={[styles.submitButtonText, { fontSize: scaleFont(16), color: palette.background }]}>
                 {isSubmitting ? "Enviando..." : "Enviar"}
               </Text>
             </Pressable>
@@ -209,7 +258,6 @@ export default function Feedback() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: AppPalette.primary,
     paddingHorizontal: 8,
   },
   sheetWrap: {
@@ -218,11 +266,9 @@ const styles = StyleSheet.create({
     borderLeftWidth: 14,
     borderRightWidth: 14,
     borderBottomWidth: 0,
-    borderColor: AppPalette.primary,
   },
   sheet: {
     flex: 1,
-    backgroundColor: "#D8E5EA",
     borderTopLeftRadius: 40,
     borderTopRightRadius: 40,
     borderBottomLeftRadius: 40,
@@ -253,17 +299,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   title: {
-    fontSize: 24,
-    lineHeight: 30,
     fontWeight: "700",
-    color: AppPalette.primary,
     textAlign: "center",
   },
   description: {
-    fontSize: 15,
-    lineHeight: 22,
     textAlign: "center",
-    color: "rgba(29, 27, 32, 0.75)",
     marginBottom: 20,
     paddingHorizontal: 14,
   },
@@ -271,9 +311,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   sectionTitle: {
-    fontSize: 16,
     fontWeight: "700",
-    color: AppPalette.textPrimary,
     marginBottom: 12,
     paddingHorizontal: 4,
   },
@@ -289,36 +327,26 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    backgroundColor: AppPalette.background,
     paddingHorizontal: 12,
     paddingVertical: 12,
     borderRadius: 8,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: "rgba(29, 27, 32, 0.1)",
   },
   checkbox: {
     width: 24,
     height: 24,
     borderWidth: 2,
-    borderColor: "rgba(29, 27, 32, 0.3)",
     borderRadius: 4,
     alignItems: "center",
     justifyContent: "center",
   },
-  checkboxActive: {
-    borderColor: AppPalette.primary,
-    backgroundColor: "rgba(63, 155, 176, 0.1)",
-  },
   checkboxLabel: {
     flex: 1,
-    fontSize: 15,
-    color: AppPalette.textPrimary,
     fontWeight: "500",
   },
   inputContainer: {
     position: "relative",
-    backgroundColor: AppPalette.background,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: "rgba(29, 27, 32, 0.1)",
@@ -326,8 +354,6 @@ const styles = StyleSheet.create({
   input: {
     paddingHorizontal: 14,
     paddingVertical: 12,
-    fontSize: 15,
-    color: AppPalette.textPrimary,
     paddingRight: 40,
   },
   textArea: {
@@ -344,14 +370,11 @@ const styles = StyleSheet.create({
     top: 8,
   },
   charCount: {
-    fontSize: 12,
-    color: "rgba(29, 27, 32, 0.5)",
     textAlign: "right",
     paddingRight: 12,
     marginTop: 4,
   },
   submitButton: {
-    backgroundColor: AppPalette.primary,
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: "center",
@@ -362,8 +385,10 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   submitButtonText: {
-    fontSize: 16,
     fontWeight: "700",
-    color: AppPalette.background,
   },
 });
+
+function highContrastBorderColor(color: string) {
+  return color;
+}

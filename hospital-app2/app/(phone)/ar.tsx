@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavStore } from "../../store/navStore";
 import { computeRoute } from "../../lib/route/routeEngine";
 import { buildDetailedInstruction } from "../../lib/route/navigationInstructions";
-import { AppPalette } from "../../constants/theme";
+import { AppPalette, useAppAppearance } from "../../constants/theme";
 import { projectGeoJSONForMap } from "../../lib/coords/localToLngLat";
 
 let CameraViewImpl: any = null;
@@ -155,6 +155,10 @@ function getBannerIconName(hint: string) {
   }
 }
 
+function formatInstructionForSpeech(title: string) {
+  return title.replace(/(\d+)\s?m\b/g, "$1 metros");
+}
+
 const FLOOR_GUIDE_COLORS = ["#55F5FF", "#1739FF"];
 
 function isFloorGuideHint(hint: string) {
@@ -180,6 +184,7 @@ function getFloorGuideShift(variant: ReturnType<typeof getFloorGuideVariant>, pr
 }
 
 export default function ArNavigation() {
+  const { palette } = useAppAppearance();
   const insets = useSafeAreaInsets();
   const [cameraPermission, requestCameraPermission] = useCameraPermissionsImpl();
   const isCameraNativeAvailable = Boolean(CameraViewImpl);
@@ -334,8 +339,21 @@ export default function ArNavigation() {
     [destinationId, navData.nodes, segments]
   );
 
+  const userCoord = ((livePosition as any)?.coords as [number, number] | null) ?? null;
+  const destinationFeature = useMemo(
+    () => navData.nodes?.features?.find((item: any) => item.properties?.id === destinationId) || null,
+    [destinationId, navData.nodes]
+  );
+  const isAtDestination = useMemo(() => {
+    if (!isStarted || !destinationFeature || !userCoord) return false;
+
+    const destinationCoords = destinationFeature?.geometry?.coordinates;
+    return Array.isArray(destinationCoords) && distanceMeters(userCoord, destinationCoords as [number, number]) <= 1.0;
+  }, [destinationFeature, isStarted, userCoord]);
+
   const displayedInstructionIndex = useMemo(() => {
     if (!instructionItems.length) return 0;
+    if (isAtDestination) return instructionItems.length - 1;
 
     const clampedActiveIndex = Math.min(activeStepIndex, instructionItems.length - 1);
     const activeSegment = segments[clampedActiveIndex] || null;
@@ -350,12 +368,11 @@ export default function ArNavigation() {
     }
 
     return clampedActiveIndex;
-  }, [activeStepIndex, currentFloor, instructionItems.length, segments]);
+  }, [activeStepIndex, currentFloor, instructionItems.length, isAtDestination, segments]);
 
   const currentSegment = segments[displayedInstructionIndex] || null;
   const nextSegment = segments[displayedInstructionIndex + 1] || null;
   const nextInstruction = instructionItems[displayedInstructionIndex] || null;
-  const userCoord = ((livePosition as any)?.coords as [number, number] | null) ?? null;
 
   const activeInstructionProgress = useMemo(() => {
     if (!userCoord) return 0;
@@ -524,22 +541,23 @@ export default function ArNavigation() {
   const bannerIconName = useMemo(() => getBannerIconName(arHint), [arHint]);
 
   useEffect(() => {
+    if (!isStarted) {
+      lastSpokenInstructionKeyRef.current = null;
+    }
+  }, [destinationId, isStarted]);
+
+  useEffect(() => {
     if (!isStarted || !soundEnabled || !bannerInstruction?.title) return;
 
-    const instructionKey = `${displayedInstructionIndex}:${bannerInstruction.title}:${bannerInstruction.detail || ""}`;
+    const instructionKey = `${displayedInstructionIndex}:${bannerInstruction.title}`;
     if (lastSpokenInstructionKeyRef.current === instructionKey) return;
 
     lastSpokenInstructionKeyRef.current = instructionKey;
     Speech.stop();
-    Speech.speak(
-      bannerInstruction.detail
-        ? `${bannerInstruction.title}. ${bannerInstruction.detail}`
-        : bannerInstruction.title,
-      {
-        language: "es-ES",
-        rate: 0.95,
-      }
-    );
+    Speech.speak(formatInstructionForSpeech(bannerInstruction.title), {
+      language: "es-ES",
+      rate: 0.95,
+    });
   }, [bannerInstruction?.detail, bannerInstruction?.title, displayedInstructionIndex, isStarted, soundEnabled]);
 
   useEffect(() => {
@@ -742,7 +760,7 @@ export default function ArNavigation() {
   ]);
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { backgroundColor: palette.background }]}>
       {isCameraNativeAvailable && cameraPermission?.granted ? (
         <CameraViewImpl facing="back" style={styles.camera} />
       ) : !isCameraNativeAvailable ? (
@@ -768,7 +786,7 @@ export default function ArNavigation() {
             <MaterialCommunityIcons
               name={bannerIconName as any}
               size={76}
-              color={AppPalette.textPrimary}
+              color={palette.textPrimary}
               style={styles.instructionHeaderIcon}
             />
             <View style={styles.instructionTextWrap}>
@@ -796,24 +814,24 @@ export default function ArNavigation() {
 
         <View style={[styles.mapActions, { top: Math.max(insets.top, 12) + 112 }]}>
           <Pressable style={styles.actionButton} onPress={() => router.replace("/navigate")}>
-            <Ionicons name="map-outline" size={28} color={AppPalette.background} />
+            <Ionicons name="map-outline" size={28} color={palette.background} />
           </Pressable>
           <Pressable style={styles.actionButton} onPress={handlePreferencePress}>
             <MaterialCommunityIcons
               name={prefer === "stairs" ? "stairs" : "elevator"}
               size={28}
-              color={AppPalette.background}
+              color={palette.background}
             />
           </Pressable>
           <Pressable style={styles.actionButton} onPress={() => setSoundEnabled(!soundEnabled)}>
             <Ionicons
               name={soundEnabled ? "volume-high" : "volume-mute"}
               size={28}
-              color={AppPalette.background}
+              color={palette.background}
             />
           </Pressable>
           <Pressable style={styles.actionButton} onPress={() => router.push("/help")}>
-            <Ionicons name="help" size={28} color={AppPalette.background} />
+            <Ionicons name="help" size={28} color={palette.background} />
           </Pressable>
         </View>
 
@@ -923,15 +941,15 @@ export default function ArNavigation() {
 
               {arHint === "up" ? (
                 <View style={styles.floorArrowWrap}>
-                  <MaterialCommunityIcons name="stairs-up" size={112} color={AppPalette.primary} />
-                  <MaterialCommunityIcons name="arrow-up-bold" size={96} color={AppPalette.primary} />
+                  <MaterialCommunityIcons name="stairs-up" size={112} color={palette.primary} />
+                  <MaterialCommunityIcons name="arrow-up-bold" size={96} color={palette.primary} />
                 </View>
               ) : null}
 
               {arHint === "down" ? (
                 <View style={styles.floorArrowWrap}>
-                  <MaterialCommunityIcons name="stairs-down" size={112} color={AppPalette.primary} />
-                  <MaterialCommunityIcons name="arrow-down-bold" size={96} color={AppPalette.primary} />
+                  <MaterialCommunityIcons name="stairs-down" size={112} color={palette.primary} />
+                  <MaterialCommunityIcons name="arrow-down-bold" size={96} color={palette.primary} />
                 </View>
               ) : null}
             </View>
@@ -968,7 +986,7 @@ export default function ArNavigation() {
               <Ionicons
                 name={headingBlockerState.tone === "success" ? "checkmark-circle" : "compass-outline"}
                 size={36}
-                color={headingBlockerState.tone === "success" ? "#175C36" : AppPalette.textPrimary}
+                color={headingBlockerState.tone === "success" ? "#175C36" : palette.textPrimary}
               />
             </View>
             <Text style={styles.blockerTitle}>{headingBlockerState.title}</Text>

@@ -29,12 +29,15 @@ type RouteState = {
 
 type NavigationPreference = "stairs" | "elevator";
 type MapViewMode = "navigate" | "ar";
+export type TextSizePreset = "small" | "medium" | "large";
 
 type NavigationUiState = {
   isStarted: boolean;
   prefer: NavigationPreference;
   mapViewMode: MapViewMode;
   soundEnabled: boolean;
+  textSize: TextSizePreset;
+  highContrastEnabled: boolean;
   activeStepIndex: number;
   navigationFloor: number | null;
   hasDismissedHomeHero: boolean;
@@ -91,6 +94,8 @@ type Store = {
   setMapViewMode: (mode: MapViewMode) => void;
   toggleNavigationPreference: () => void;
   setSoundEnabled: (enabled: boolean) => void;
+  setTextSize: (size: TextSizePreset) => void;
+  setHighContrastEnabled: (enabled: boolean) => void;
   setActiveStepIndex: (index: number) => void;
   setNavigationFloor: (floor: number | null) => void;
   setHomeHeroDismissed: (dismissed: boolean) => void;
@@ -133,6 +138,8 @@ export const useNavStore = create<Store>((set, get) => ({
     prefer: "stairs",
     mapViewMode: "navigate",
     soundEnabled: false,
+    textSize: "medium",
+    highContrastEnabled: false,
     activeStepIndex: 0,
     navigationFloor: 0,
     hasDismissedHomeHero: false,
@@ -271,6 +278,10 @@ export const useNavStore = create<Store>((set, get) => ({
     })),
   setSoundEnabled: (enabled) =>
     set((s) => ({ navigationUi: { ...s.navigationUi, soundEnabled: enabled } })),
+  setTextSize: (textSize) =>
+    set((s) => ({ navigationUi: { ...s.navigationUi, textSize } })),
+  setHighContrastEnabled: (enabled) =>
+    set((s) => ({ navigationUi: { ...s.navigationUi, highContrastEnabled: enabled } })),
   setActiveStepIndex: (index) =>
     set((s) => ({ navigationUi: { ...s.navigationUi, activeStepIndex: Math.max(0, index) } })),
   setNavigationFloor: (floor) =>

@@ -3,7 +3,7 @@ import { View, Text, Pressable, FlatList, StyleSheet, TextInput, Image } from "r
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavStore } from "../../store/navStore";
-import { AppPalette } from "../../constants/theme";
+import { AppPalette, useAppAppearance } from "../../constants/theme";
 import { computeRoute } from "../../lib/route/routeEngine";
 import { trackEvent } from "../../lib/telemetry";
 import {
@@ -26,6 +26,7 @@ function distanceMeters(a: [number, number], b: [number, number]) {
 }
 
 export default function Search() {
+  const { palette } = useAppAppearance();
   const navData = useNavStore((s) => s.navData);
   const start = useNavStore((s) => s.start);
   const livePosition = useNavStore((s) => s.livePosition);
@@ -236,18 +237,18 @@ export default function Search() {
     });
   }, [availableEntries, browseCategories, focusedCategory, query, recentEntries, topDestinations]);
 
-  if (!navData.isLoaded) return <View style={styles.page}><Text>Loading...</Text></View>;
+  if (!navData.isLoaded) return <View style={[styles.page, { backgroundColor: palette.background }]}><Text style={{ color: palette.textPrimary }}>Loading...</Text></View>;
   if (navData.validationErrors.length) {
     return (
-      <View style={styles.page}>
-        <Text style={{ fontWeight: "700" }}>Navigation data invalid</Text>
-        <Text>{navData.validationErrors.join("\n")}</Text>
+      <View style={[styles.page, { backgroundColor: palette.background }]}>
+        <Text style={{ fontWeight: "700", color: palette.textPrimary }}>Navigation data invalid</Text>
+        <Text style={{ color: palette.textPrimary }}>{navData.validationErrors.join("\n")}</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.page}>
+    <View style={[styles.page, { backgroundColor: palette.background }]}>
       <View style={styles.headerWrap}>
         <View style={styles.brandMark}>
           <Image source={require("../../assets/icons/logo.png")} style={styles.brandLogo} resizeMode="contain" />
@@ -267,10 +268,10 @@ export default function Search() {
             }}
             style={styles.backButton}
           >
-            <Ionicons name="arrow-back" size={34} color={AppPalette.textPrimary} />
+            <Ionicons name="arrow-back" size={34} color={palette.textPrimary} />
           </Pressable>
         ) : null}
-        <View style={styles.searchInputWrap}>
+        <View style={[styles.searchInputWrap, { backgroundColor: palette.surfaceAlt }]}>
           <TextInput
             value={query}
             onChangeText={setQuery}
@@ -280,7 +281,7 @@ export default function Search() {
                 : "A donde va?"
             }
             placeholderTextColor="rgba(29, 27, 32, 0.65)"
-            style={styles.searchInput}
+            style={[styles.searchInput, { color: palette.textPrimary }]}
           />
           <Ionicons name="search" size={32} color="rgba(29, 27, 32, 0.75)" />
         </View>
@@ -288,7 +289,7 @@ export default function Search() {
 
       {!focusedCategory ? (
         <>
-          <Text style={styles.sectionHeading}>Explorar por tipo</Text>
+          <Text style={[styles.sectionHeading, { color: palette.textSectionTitles }]}>Explorar por tipo</Text>
           <FlatList
             data={browseCategories}
             horizontal
@@ -298,20 +299,20 @@ export default function Search() {
             keyExtractor={(item) => item.key}
             renderItem={({ item: category }) => (
               <Pressable
-                style={styles.chip}
+                style={[styles.chip, { borderColor: palette.primary }]}
                 onPress={() => {
                   setFocusedCategory(category.key);
                   setQuery("");
                 }}
               >
-                <Text style={styles.chipText}>{category.chipLabel}</Text>
+                <Text style={[styles.chipText, { color: palette.textPrimary }]}>{category.chipLabel}</Text>
               </Pressable>
             )}
           />
         </>
       ) : null}
 
-      <Text style={styles.sectionHeading}>
+      <Text style={[styles.sectionHeading, { color: palette.textSectionTitles }]}>
         {focusedCategory
           ? selectedCategory?.sectionTitle || "Directorio"
           : "Top Destinations"}
@@ -323,7 +324,7 @@ export default function Search() {
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <Pressable
-            style={styles.item}
+            style={[styles.item, { borderColor: palette.lines, backgroundColor: palette.lists }]}
             onPress={() => {
               setNavigationStarted(false);
               console.log("[EntrancePicker] destination selected", {
@@ -354,8 +355,8 @@ export default function Search() {
               router.push("/navigate");
             }}
           >
-            <Text style={styles.itemText}>{item.name}</Text>
-            <Text style={styles.itemMeta}>
+            <Text style={[styles.itemText, { color: palette.textPrimary }]}>{item.name}</Text>
+            <Text style={[styles.itemMeta, { color: palette.textPrimary }]}>
               {item.category === "entrances"
                 ? `${item.street || getBuildingLabel(item.destinationNodeId)} · Planta ${item.floor}`
                 : `${getBuildingLabel(item.destinationNodeId)} · Planta ${item.floor}${item.roomNumber ? ` · Sala ${item.roomNumber}` : ""}${item.doctor ? ` · ${item.doctor}` : ""}`}
@@ -363,7 +364,7 @@ export default function Search() {
           </Pressable>
         )}
         ListEmptyComponent={
-          <Text style={styles.emptyText}>
+          <Text style={[styles.emptyText, { color: palette.textPrimary }]}>
             {focusedCategory === "recent"
               ? "Todavia no hay destinos recientes."
               : "No hay resultados para esa busqueda."}

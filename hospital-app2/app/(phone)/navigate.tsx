@@ -9,7 +9,7 @@ import IndoorMap from "../../components/map/IndoorMap";
 import { computeRoute } from "../../lib/route/routeEngine";
 import { buildDetailedInstruction as buildSharedDetailedInstruction } from "../../lib/route/navigationInstructions";
 import { HOSPITAL_DIRECTORY, normalizeSearchValue } from "../../lib/hospitalDirectory";
-import { AppPalette } from "../../constants/theme";
+import { AppPalette, useAppAppearance } from "../../constants/theme";
 import { projectCoordsForMap, projectGeoJSONForMap } from "../../lib/coords/localToLngLat";
 import { trackEvent } from "../../lib/telemetry";
 
@@ -600,7 +600,12 @@ function getInstructionIconName(maneuver?: string | null) {
   }
 }
 
+function formatInstructionForSpeech(title: string) {
+  return title.replace(/(\d+)\s?m\b/g, "$1 metros");
+}
+
 export default function Navigate() {
+  const { palette } = useAppAppearance();
   const [showSteps, setShowSteps] = useState(false);
   const [showStartDropdown, setShowStartDropdown] = useState(false);
   const [showCurrentLocationFloorPrompt, setShowCurrentLocationFloorPrompt] = useState(false);
@@ -737,6 +742,17 @@ export default function Navigate() {
     () => navData.nodes?.features?.find((item: any) => item.properties?.id === destinationId) || null,
     [destinationId, navData.nodes]
   );
+  const isAtDestination = useMemo(() => {
+    if (!isStarted || !destinationFeature || !userCoord) return false;
+
+    const destinationCoords = destinationFeature?.geometry?.coordinates;
+    if (!Array.isArray(destinationCoords)) return false;
+
+    return (
+      confirmedNodeId === destinationId ||
+      distanceMeters(userCoord, destinationCoords as [number, number]) <= ARRIVAL_COMPLETE_RADIUS_METERS
+    );
+  }, [confirmedNodeId, destinationFeature, destinationId, isStarted, userCoord]);
 
   const destinationDirectoryEntry = useMemo(
     () => HOSPITAL_DIRECTORY.find((entry) => entry.destinationNodeId === destinationId) || null,
@@ -1099,6 +1115,7 @@ export default function Navigate() {
 
   const displayedInstructionIndex = useMemo(() => {
     if (!instructionItems.length) return 0;
+    if (isAtDestination) return instructionItems.length - 1;
 
     const clampedActiveIndex = Math.min(activeStepIndex, instructionItems.length - 1);
     const activeSegment = segments[clampedActiveIndex] || null;
@@ -1198,6 +1215,7 @@ export default function Navigate() {
     currentFloor,
     hasManualFloorSelection,
     instructionItems.length,
+    isAtDestination,
     segments,
   ]);
 
@@ -1244,22 +1262,23 @@ export default function Navigate() {
   const instructionIconName = getInstructionIconName(bannerInstruction?.maneuver);
 
   useEffect(() => {
+    if (!isStarted) {
+      lastSpokenInstructionKeyRef.current = null;
+    }
+  }, [destinationId, isStarted]);
+
+  useEffect(() => {
     if (!isStarted || !soundEnabled || !bannerInstruction?.title) return;
 
-    const instructionKey = `${displayedInstructionIndex}:${bannerInstruction.title}:${bannerInstruction.detail || ""}`;
+    const instructionKey = `${displayedInstructionIndex}:${bannerInstruction.title}`;
     if (lastSpokenInstructionKeyRef.current === instructionKey) return;
 
     lastSpokenInstructionKeyRef.current = instructionKey;
     Speech.stop();
-    Speech.speak(
-      bannerInstruction.detail
-        ? `${bannerInstruction.title}. ${bannerInstruction.detail}`
-        : bannerInstruction.title,
-      {
-        language: "es-ES",
-        rate: 0.95,
-      }
-    );
+    Speech.speak(formatInstructionForSpeech(bannerInstruction.title), {
+      language: "es-ES",
+      rate: 0.95,
+    });
   }, [bannerInstruction?.detail, bannerInstruction?.title, displayedInstructionIndex, isStarted, soundEnabled]);
 
   const visibleFloorOptions = useMemo(() => {
@@ -2063,7 +2082,7 @@ export default function Navigate() {
     : 0;
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { backgroundColor: palette.background }]}>
       {!isStarted ? (
         <View style={styles.header}>
           <Pressable
@@ -2196,13 +2215,13 @@ export default function Navigate() {
             </View>
           ) : null}
 
-          <Pressable style={styles.locationCard} onPress={() => router.push("/search")}>
+          <Pressable style={[styles.locationCard, { backgroundColor: palette.surfaceAlt }]} onPress={() => router.push("/search")}>
             <View style={styles.cardTextWrap}>
-              <Text style={styles.cardLabel}>Destino</Text>
-              <Text style={styles.cardTitle}>
+              <Text style={[styles.cardLabel, { color: palette.textSectionTitles }]}>Destino</Text>
+              <Text style={[styles.cardTitle, { color: palette.textPrimary }]}>
                 {getNodeLabel(navData.nodes, destinationId) || "Seleccionar destino"}
               </Text>
-              <Text style={styles.cardMeta}>
+              <Text style={[styles.cardMeta, { color: palette.textPrimary }]}>
                 {route.ok
                   ? `Planta ${route.summary?.destinationFloor ?? destinationFeature?.properties?.floor ?? "-"}${destinationDirectoryEntry?.roomNumber ? ` | Sala ${destinationDirectoryEntry.roomNumber}` : ""} | ${route.summary?.etaMinutes ?? "?"} min | ${route.summary?.totalMeters ?? "?"} m`
                   : route.reason
@@ -2210,7 +2229,7 @@ export default function Navigate() {
                     : "Preparando ruta"}
               </Text>
             </View>
-            <Ionicons name="pencil" size={24} color={AppPalette.textPrimary} />
+            <Ionicons name="pencil" size={24} color={palette.textPrimary} />
           </Pressable>
 
         </View>
@@ -2223,7 +2242,7 @@ export default function Navigate() {
               style={styles.popupClose}
               onPress={() => setShowOutdoorHandoffPopup(false)}
             >
-              <Ionicons name="close" size={20} color={AppPalette.textPrimary} />
+              <Ionicons name="close" size={20} color={palette.textPrimary} />
             </Pressable>
             <Text style={styles.popupTitle}>Fuera del hospital</Text>
             <Text style={styles.popupBody}>
@@ -2284,7 +2303,7 @@ export default function Navigate() {
                 <MaterialCommunityIcons
                   name={instructionIconName as any}
                   size={44}
-                  color={AppPalette.textPrimary}
+                  color={palette.textPrimary}
                   style={styles.instructionIcon}
                 />
               </View>
@@ -2317,31 +2336,31 @@ export default function Navigate() {
               <MaterialCommunityIcons
                 name="crosshairs-gps"
                 size={28}
-                color={isFollowingUser ? AppPalette.background : AppPalette.primary}
+                color={isFollowingUser ? palette.background : palette.primary}
               />
             </Pressable>
 
             <View style={styles.mapActions}>
               <Pressable style={styles.mapActionButton} onPress={() => router.replace("/ar")}>
-                <Ionicons name="camera-outline" size={26} color={AppPalette.background} />
+                <Ionicons name="camera-outline" size={26} color={palette.background} />
                 <Text style={styles.mapActionBadge}>RA</Text>
               </Pressable>
               <Pressable style={styles.mapActionButton} onPress={handlePreferencePress}>
                 <MaterialCommunityIcons
                   name={prefer === "stairs" ? "stairs" : "elevator"}
                   size={28}
-                  color={AppPalette.background}
+                  color={palette.background}
                 />
               </Pressable>
               <Pressable style={styles.mapActionButton} onPress={() => setSoundEnabled(!soundEnabled)}>
                 <Ionicons
                   name={soundEnabled ? "volume-high" : "volume-mute"}
                   size={28}
-                  color={AppPalette.background}
+                  color={palette.background}
                 />
               </Pressable>
               <Pressable style={styles.mapActionButton} onPress={() => router.push("/help")}>
-                <Ionicons name="help" size={28} color={AppPalette.background} />
+                <Ionicons name="help" size={28} color={palette.background} />
               </Pressable>
             </View>
 
@@ -2463,7 +2482,7 @@ export default function Navigate() {
                     </View>
                   </View>
                   <Pressable onPress={() => setShowSteps(false)} style={styles.stepsClose}>
-                    <Ionicons name="close" size={24} color={AppPalette.textPrimary} />
+                    <Ionicons name="close" size={24} color={palette.textPrimary} />
                   </Pressable>
                 </View>
               </View>
