@@ -38,6 +38,7 @@ type NavigationUiState = {
   activeStepIndex: number;
   navigationFloor: number | null;
   hasDismissedHomeHero: boolean;
+  recentDestinationIds: string[];
 };
 
 type StartState = {
@@ -79,6 +80,7 @@ type Store = {
   ingestTrackedSample: (coords: [number, number], floor?: number | null) => void;
 
   setDestinationId: (id: string) => void;
+  pushRecentDestination: (id: string) => void;
   setPostNavStartOverrideId: (id: string | null) => void;
   clearPostNavStartOverride: () => void;
 
@@ -130,10 +132,11 @@ export const useNavStore = create<Store>((set, get) => ({
     isStarted: false,
     prefer: "stairs",
     mapViewMode: "navigate",
-    soundEnabled: true,
+    soundEnabled: false,
     activeStepIndex: 0,
     navigationFloor: 0,
     hasDismissedHomeHero: false,
+    recentDestinationIds: [],
   },
 
   setNavData: (partial) =>
@@ -210,7 +213,27 @@ export const useNavStore = create<Store>((set, get) => ({
       },
     })),
 
-  setDestinationId: (id) => set({ destinationId: id }),
+  setDestinationId: (id) =>
+    set((s) => ({
+      destinationId: id,
+      navigationUi: {
+        ...s.navigationUi,
+        recentDestinationIds: [
+          id,
+          ...s.navigationUi.recentDestinationIds.filter((recentId) => recentId !== id),
+        ].slice(0, 6),
+      },
+    })),
+  pushRecentDestination: (id) =>
+    set((s) => ({
+      navigationUi: {
+        ...s.navigationUi,
+        recentDestinationIds: [
+          id,
+          ...s.navigationUi.recentDestinationIds.filter((recentId) => recentId !== id),
+        ].slice(0, 6),
+      },
+    })),
   setPostNavStartOverrideId: (id) => set({ postNavStartOverrideId: id }),
   clearPostNavStartOverride: () => set({ postNavStartOverrideId: null }),
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 const DEFAULT_PORT = Number(process.env.TRACKING_MOCK_PORT || 8080);
-const DEFAULT_STEP_X = Number(process.env.TRACKING_MOCK_STEP_X || 100);
-const DEFAULT_STEP_Y = Number(process.env.TRACKING_MOCK_STEP_Y || 8);
+const DEFAULT_STEP_X = Number(process.env.TRACKING_MOCK_STEP_X || 0.5);
+const DEFAULT_STEP_Y = Number(process.env.TRACKING_MOCK_STEP_Y || 0.5);
 const DEFAULT_X = Number(process.env.TRACKING_MOCK_START_X || 0);
 const DEFAULT_Y = Number(process.env.TRACKING_MOCK_START_Y || 0);
 
@@ -17,8 +17,8 @@ try {
 
 let x = Number.isFinite(DEFAULT_X) ? DEFAULT_X : 0;
 let y = Number.isFinite(DEFAULT_Y) ? DEFAULT_Y : 0;
-let stepX = Number.isFinite(DEFAULT_STEP_X) && DEFAULT_STEP_X > 0 ? DEFAULT_STEP_X : 100;
-let stepY = Number.isFinite(DEFAULT_STEP_Y) && DEFAULT_STEP_Y > 0 ? DEFAULT_STEP_Y : 8;
+let stepX = Number.isFinite(DEFAULT_STEP_X) && DEFAULT_STEP_X > 0 ? DEFAULT_STEP_X : 0.5;
+let stepY = Number.isFinite(DEFAULT_STEP_Y) && DEFAULT_STEP_Y > 0 ? DEFAULT_STEP_Y : 0.5;
 
 const wss = new WebSocketServer({ host: "0.0.0.0", port: DEFAULT_PORT });
 

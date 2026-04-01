@@ -14,35 +14,51 @@ export type TrackingCalibration = {
 export const DEFAULT_TRACKING_CALIBRATION: TrackingCalibration = {
   sourceOriginX: 0,
   sourceOriginY: 0,
-  offsetX: 3.4246,
-  offsetY: -7.9429,
+  offsetX: 0,
+  offsetY: 0,
   rotationDeg: 0,
   scale: 1,
-  scaleX: 12.9074 / 8200,
-  scaleY: 8.5369 / 420,
+  scaleX: 1,
+  scaleY: 1,
   flipX: false,
-  flipY: true,
+  flipY: false,
 };
+
+//export const DEFAULT_TRACKING_CALIBRATION: TrackingCalibration = {
+// sourceOriginX: 0,
+  //sourceOriginY: 0,
+//  offsetX: 0.4246,
+//  offsetY: -9.9429,
+//  rotationDeg: 0,
+//  scale: 1,
+//  scaleX: 12.9074 / 3.8,
+//  scaleY: 8.5369 / 2.4,
+//  flipX: false,
+//  flipY: false,
+// };
 
 export function applyTrackingCalibration(
   input: [number, number],
   calibration: TrackingCalibration
 ): [number, number] {
-  const scaleX = calibration.scaleX ?? calibration.scale;
-  const scaleY = calibration.scaleY ?? calibration.scale;
-  const sourceOriginX = calibration.sourceOriginX ?? 0;
-  const sourceOriginY = calibration.sourceOriginY ?? 0;
-  const scaledX =
-    (input[0] - sourceOriginX) *
-    scaleX *
-    calibration.scale *
-    (calibration.flipX ? -1 : 1);
-  const scaledY =
-    (input[1] - sourceOriginY) *
-    scaleY *
-    calibration.scale *
-    (calibration.flipY ? -1 : 1);
-  const radians = (calibration.rotationDeg * Math.PI) / 180;
+  const {
+    sourceOriginX = 0,
+    sourceOriginY = 0,
+    offsetX,
+    offsetY,
+    rotationDeg,
+    scale = 1,
+    scaleX = scale,
+    scaleY = scale,
+    flipX,
+    flipY,
+  } = calibration;
+
+  const flipSignX = flipX ? -1 : 1;
+  const flipSignY = flipY ? -1 : 1;
+  const scaledX = (input[0] - sourceOriginX) * scaleX * scale * flipSignX;
+  const scaledY = (input[1] - sourceOriginY) * scaleY * scale * flipSignY;
+  const radians = (rotationDeg * Math.PI) / 180;
   const cos = Math.cos(radians);
   const sin = Math.sin(radians);
 
@@ -50,7 +66,7 @@ export function applyTrackingCalibration(
   const rotatedY = scaledX * sin + scaledY * cos;
 
   return [
-    rotatedX + calibration.offsetX,
-    rotatedY + calibration.offsetY,
+    rotatedX + offsetX,
+    rotatedY + offsetY,
   ];
 }
