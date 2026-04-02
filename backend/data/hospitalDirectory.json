@@ -1,0 +1,260 @@
+{
+  "categories": [
+    {
+      "key": "recent",
+      "chipLabel": "Recientes",
+      "sectionTitle": "Destinos recientes",
+      "searchPlaceholder": "Buscar reciente"
+    },
+    {
+      "key": "specialties",
+      "chipLabel": "Especialidad",
+      "sectionTitle": "Especialidades",
+      "searchPlaceholder": "Buscar especialidad"
+    },
+    {
+      "key": "diagnostics",
+      "chipLabel": "Prueba diagnostica",
+      "sectionTitle": "Pruebas medicas",
+      "searchPlaceholder": "Buscar prueba medica"
+    },
+    {
+      "key": "services",
+      "chipLabel": "Servicios",
+      "sectionTitle": "Servicios",
+      "searchPlaceholder": "Buscar servicio"
+    },
+    {
+      "key": "entrances",
+      "chipLabel": "Entradas",
+      "sectionTitle": "Entradas",
+      "searchPlaceholder": "Buscar entrada"
+    }
+  ],
+  "entries": [
+    {
+      "id": "spec-gynecology-f1",
+      "category": "specialties",
+      "name": "Ginecologia",
+      "doctor": "Dra. Lucia Martin",
+      "roomNumber": "101",
+      "floor": 1,
+      "destinationNodeId": "n_car_door_1",
+      "keywords": ["ginecologia", "obstetrica", "mujer", "101"]
+    },
+    {
+      "id": "spec-ultrasound-f1",
+      "category": "specialties",
+      "name": "Ecografia",
+      "doctor": "Dr. Javier Ortega",
+      "roomNumber": "102",
+      "floor": 1,
+      "destinationNodeId": "n_car_door_2",
+      "keywords": ["ultrasonido", "ecografia", "imagen", "102"]
+    },
+    {
+      "id": "spec-medical-tests-f1",
+      "category": "specialties",
+      "name": "Pruebas medicas",
+      "doctor": "Dra. Elena Ruiz",
+      "roomNumber": "103",
+      "floor": 1,
+      "destinationNodeId": "n_car_door_3",
+      "keywords": ["pruebas", "medicas", "tests", "103"]
+    },
+    {
+      "id": "spec-radiology-f1",
+      "category": "specialties",
+      "name": "Radiologia",
+      "doctor": "Dr. Carlos Vega",
+      "roomNumber": "201",
+      "floor": 1,
+      "destinationNodeId": "n_neu_door_1",
+      "keywords": ["radiologia", "rayos x", "imagen", "201"]
+    },
+    {
+      "id": "spec-pediatrics-f1",
+      "category": "specialties",
+      "name": "Pediatria",
+      "doctor": "Dra. Marta Sanchez",
+      "roomNumber": "203",
+      "floor": 1,
+      "destinationNodeId": "n_neu_door_3",
+      "keywords": ["pediatria", "ninos", "infantil", "203"]
+    },
+    {
+      "id": "spec-cardiology-1-f0",
+      "category": "specialties",
+      "name": "Cardiologia general",
+      "doctor": "Dr. Alvaro Perez",
+      "roomNumber": "001",
+      "floor": 0,
+      "destinationNodeId": "n_car_door_1_f0",
+      "keywords": ["cardiologia", "corazon", "cardio", "001"]
+    },
+    {
+      "id": "spec-cardiology-2-f0",
+      "category": "specialties",
+      "name": "Cardiologia preventiva",
+      "doctor": "Dra. Paula Gomez",
+      "roomNumber": "002",
+      "floor": 0,
+      "destinationNodeId": "n_car_door_2_f0",
+      "keywords": ["cardiologia", "corazon", "cardio", "002"]
+    },
+    {
+      "id": "spec-cardiology-3-f0",
+      "category": "specialties",
+      "name": "Cardiologia de arritmias",
+      "doctor": "Dr. Sergio Navarro",
+      "roomNumber": "003",
+      "floor": 0,
+      "destinationNodeId": "n_car_door_3_f0",
+      "keywords": ["cardiologia", "corazon", "cardio", "003"]
+    },
+    {
+      "id": "spec-cardiology-4-f0",
+      "category": "specialties",
+      "name": "Consulta de insuficiencia cardiaca",
+      "doctor": "Dra. Irene Lozano",
+      "roomNumber": "004",
+      "floor": 0,
+      "destinationNodeId": "n_car_door_4_f0",
+      "keywords": ["cardiologia", "corazon", "cardio", "004"]
+    },
+    {
+      "id": "spec-cardiology-5-f0",
+      "category": "specialties",
+      "name": "Consulta de revision cardiologica",
+      "doctor": "Dr. Ruben Molina",
+      "roomNumber": "005",
+      "floor": 0,
+      "destinationNodeId": "n_car_door_5_f0",
+      "keywords": ["cardiologia", "corazon", "cardio", "005"]
+    },
+    {
+      "id": "spec-neurology-1-f0",
+      "category": "specialties",
+      "name": "Neurologia general",
+      "doctor": "Dra. Ana Torres",
+      "roomNumber": "021",
+      "floor": 0,
+      "destinationNodeId": "n_neu_door_1_f0",
+      "keywords": ["neurologia", "neuro", "sistema nervioso", "021"]
+    },
+    {
+      "id": "spec-neurology-2-f0",
+      "category": "specialties",
+      "name": "Neurologia de cefaleas",
+      "doctor": "Dr. Pablo Herrera",
+      "roomNumber": "022",
+      "floor": 0,
+      "destinationNodeId": "n_neu_door_2_f0",
+      "keywords": ["neurologia", "neuro", "sistema nervioso", "022"]
+    },
+    {
+      "id": "spec-neurology-3-f0",
+      "category": "specialties",
+      "name": "Neurologia de enfermedades neurologicas",
+      "doctor": "Dra. Clara Romero",
+      "roomNumber": "023",
+      "floor": 0,
+      "destinationNodeId": "n_neu_door_3_f0",
+      "keywords": ["neurologia", "neuro", "sistema nervioso", "023"]
+    },
+    {
+      "id": "spec-wr-f0",
+      "category": "specialties",
+      "name": "Servicio WR",
+      "doctor": "Dr. Miguel Castro",
+      "roomNumber": "031",
+      "floor": 0,
+      "destinationNodeId": "n_wr_door_1_f0",
+      "keywords": ["servicio", "wr", "031"]
+    },
+    {
+      "id": "diag-laboratory-f1",
+      "category": "diagnostics",
+      "name": "Analisis de laboratorio",
+      "doctor": "Dra. Sofia Gil",
+      "roomNumber": "202",
+      "floor": 1,
+      "destinationNodeId": "n_neu_door_2",
+      "keywords": ["laboratorio", "analisis", "sangre", "202"]
+    },
+    {
+      "id": "serv-pharmacy-f1",
+      "category": "services",
+      "name": "Farmacia",
+      "floor": 1,
+      "destinationNodeId": "n_wr_door_1",
+      "keywords": ["farmacia", "medicinas", "medicamentos"]
+    },
+    {
+      "id": "serv-bathroom-f1",
+      "category": "services",
+      "name": "Aseos",
+      "floor": 1,
+      "destinationNodeId": "n_car_door_4",
+      "keywords": ["bano", "aseo", "sanitarios"]
+    },
+    {
+      "id": "serv-cafeteria-f1",
+      "category": "services",
+      "name": "Cafeteria",
+      "floor": 1,
+      "destinationNodeId": "n_car_door_5",
+      "keywords": ["cafeteria", "comida", "cafe"]
+    },
+    {
+      "id": "serv-elevator-f1",
+      "category": "services",
+      "name": "Ascensor",
+      "floor": 1,
+      "destinationNodeId": "elevator_001",
+      "keywords": ["ascensor", "elevador"]
+    },
+    {
+      "id": "serv-stairs-f1",
+      "category": "services",
+      "name": "Escaleras",
+      "floor": 1,
+      "destinationNodeId": "stair_001",
+      "keywords": ["escaleras", "stairs"]
+    },
+    {
+      "id": "serv-elevator-f0",
+      "category": "services",
+      "name": "Ascensor",
+      "floor": 0,
+      "destinationNodeId": "elevator_001_f0",
+      "keywords": ["ascensor", "elevador"]
+    },
+    {
+      "id": "serv-stairs-f0",
+      "category": "services",
+      "name": "Escaleras",
+      "floor": 0,
+      "destinationNodeId": "stair_001_f0",
+      "keywords": ["escaleras", "stairs"]
+    },
+    {
+      "id": "ent-main-f0",
+      "category": "entrances",
+      "name": "Entrada principal",
+      "street": "Calle de la Mancha, 14",
+      "floor": 0,
+      "destinationNodeId": "n_hospital_entrance_f0",
+      "keywords": ["entrada", "principal", "acceso"]
+    },
+    {
+      "id": "ent-south-f0",
+      "category": "entrances",
+      "name": "Entrada sur",
+      "street": "Avenida de Almeria, 8",
+      "floor": 0,
+      "destinationNodeId": "n_hospital_entrance_2_f0",
+      "keywords": ["entrada", "sur", "acceso"]
+    }
+  ]
+}

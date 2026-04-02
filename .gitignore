@@ -1,6 +1,7 @@
 # Local project folders
 /frontend
-/backend
+/backend/.env
+/backend/node_modules/
 
 # Python local environment
 __pycache__/
