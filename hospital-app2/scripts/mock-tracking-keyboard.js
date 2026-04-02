@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
-const DEFAULT_PORT = Number(process.env.TRACKING_MOCK_PORT || 8080);
-const DEFAULT_STEP_X = Number(process.env.TRACKING_MOCK_STEP_X || 0.5);
-const DEFAULT_STEP_Y = Number(process.env.TRACKING_MOCK_STEP_Y || 0.5);
-const DEFAULT_X = Number(process.env.TRACKING_MOCK_START_X || 0);
-const DEFAULT_Y = Number(process.env.TRACKING_MOCK_START_Y || 0);
+const PORT = 8080;
+const START_X = 0;
+const START_Y = 0;
+const STEP_X = 0.5;
+const STEP_Y = 0.5;
 
 let WebSocketServer;
 
@@ -15,14 +15,14 @@ try {
   process.exit(1);
 }
 
-let x = Number.isFinite(DEFAULT_X) ? DEFAULT_X : 0;
-let y = Number.isFinite(DEFAULT_Y) ? DEFAULT_Y : 0;
-let stepX = Number.isFinite(DEFAULT_STEP_X) && DEFAULT_STEP_X > 0 ? DEFAULT_STEP_X : 0.5;
-let stepY = Number.isFinite(DEFAULT_STEP_Y) && DEFAULT_STEP_Y > 0 ? DEFAULT_STEP_Y : 0.5;
+let x = START_X;
+let y = START_Y;
+let stepX = STEP_X;
+let stepY = STEP_Y;
 
-const wss = new WebSocketServer({ host: "0.0.0.0", port: DEFAULT_PORT });
+const wss = new WebSocketServer({ host: "0.0.0.0", port: PORT });
 
-function buildPayload() {
+function getPayload() {
   return JSON.stringify({
     type: "position",
     x,
@@ -32,7 +32,7 @@ function buildPayload() {
 }
 
 function broadcastPosition() {
-  const payload = buildPayload();
+  const payload = getPayload();
 
   for (const client of wss.clients) {
     if (client.readyState === 1) {
@@ -40,30 +40,27 @@ function broadcastPosition() {
     }
   }
 
-  renderStatus();
+  printStatus();
 }
 
-function renderStatus() {
+function printStatus() {
   console.clear();
-  console.log(`Mock tracking WS listening on ws://0.0.0.0:${DEFAULT_PORT}`);
+  console.log(`Mock tracking server: ws://0.0.0.0:${PORT}`);
   console.log("");
-  console.log(`Raw position: x=${x.toFixed(2)}  y=${y.toFixed(2)}  stepX=${stepX.toFixed(2)}  stepY=${stepY.toFixed(2)}`);
-  console.log(`Clients: ${wss.clients.size}`);
+  console.log(`Position -> x=${x.toFixed(2)} y=${y.toFixed(2)}`);
+  console.log(`Step -> x=${stepX.toFixed(2)} y=${stepY.toFixed(2)}`);
+  console.log(`Clients -> ${wss.clients.size}`);
   console.log("");
   console.log("Controls:");
-  console.log("  W / ArrowUp       move north (+y)");
-  console.log("  S / ArrowDown     move south (-y)");
-  console.log("  A / ArrowLeft     move west (-x)");
-  console.log("  D / ArrowRight    move east (+x)");
-  console.log("  +                 increase both steps");
-  console.log("  -                 decrease both steps");
-  console.log("  R                 reset to start");
-  console.log("  P                 rebroadcast current position");
-  console.log("  Q or Ctrl+C       quit");
-}
-
-function roundStep(value) {
-  return Math.max(1, Math.round(value));
+  console.log("  W / ArrowUp    move north (+y)");
+  console.log("  S / ArrowDown  move south (-y)");
+  console.log("  A / ArrowLeft  move west (-x)");
+  console.log("  D / ArrowRight move east (+x)");
+  console.log("  +              bigger step");
+  console.log("  -              smaller step");
+  console.log("  R              reset position");
+  console.log("  P              send current position");
+  console.log("  Q or Ctrl+C    quit");
 }
 
 function move(dx, dy) {
@@ -73,9 +70,21 @@ function move(dx, dy) {
 }
 
 function resetPosition() {
-  x = Number.isFinite(DEFAULT_X) ? DEFAULT_X : 0;
-  y = Number.isFinite(DEFAULT_Y) ? DEFAULT_Y : 0;
+  x = START_X;
+  y = START_Y;
   broadcastPosition();
+}
+
+function increaseStep() {
+  stepX = Math.round((stepX + 0.1) * 10) / 10;
+  stepY = Math.round((stepY + 0.1) * 10) / 10;
+  printStatus();
+}
+
+function decreaseStep() {
+  stepX = Math.max(0.1, Math.round((stepX - 0.1) * 10) / 10);
+  stepY = Math.max(0.1, Math.round((stepY - 0.1) * 10) / 10);
+  printStatus();
 }
 
 function handleKey(buffer) {
@@ -87,36 +96,32 @@ function handleKey(buffer) {
   }
 
   if (key === "w" || key === "W" || key === "\u001b[A") {
-    move(stepX, 0);
-    return;
-  }
-
-  if (key === "s" || key === "S" || key === "\u001b[B") {
-    move(-stepX, 0);
-    return;
-  }
-
-  if (key === "a" || key === "A" || key === "\u001b[D") {
     move(0, stepY);
     return;
   }
 
-  if (key === "d" || key === "D" || key === "\u001b[C") {
+  if (key === "s" || key === "S" || key === "\u001b[B") {
     move(0, -stepY);
     return;
   }
 
+  if (key === "a" || key === "A" || key === "\u001b[D") {
+    move(-stepX, 0);
+    return;
+  }
+
+  if (key === "d" || key === "D" || key === "\u001b[C") {
+    move(stepX, 0);
+    return;
+  }
+
   if (key === "+" || key === "=") {
-    stepX = roundStep(stepX + 20);
-    stepY = Math.max(1, Math.round((stepY * 1.2) * 10) / 10);
-    renderStatus();
+    increaseStep();
     return;
   }
 
   if (key === "-" || key === "_") {
-    stepX = roundStep(stepX - 20);
-    stepY = Math.max(1, Math.round((stepY / 1.2) * 10) / 10);
-    renderStatus();
+    decreaseStep();
     return;
   }
 
@@ -131,20 +136,21 @@ function handleKey(buffer) {
 }
 
 function shutdown() {
-  process.stdin.setRawMode(false);
+  if (process.stdin.isRaw) {
+    process.stdin.setRawMode(false);
+  }
   process.stdin.pause();
   wss.close(() => process.exit(0));
 }
 
 wss.on("connection", (socket) => {
-  socket.send(buildPayload());
-  renderStatus();
+  socket.send(getPayload());
+  printStatus();
 });
 
 process.stdin.setRawMode(true);
 process.stdin.resume();
 process.stdin.on("data", handleKey);
-
 process.on("SIGINT", shutdown);
 
-renderStatus();
+printStatus();
