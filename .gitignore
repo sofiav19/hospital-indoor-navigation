@@ -30,6 +30,7 @@ hospital-app2/vscode/
 .DS_Store
 
 # hospital-app2 / Expo / Node
+hospital-app2/expo-env.d.ts
 hospital-app2/node_modules/
 hospital-app2/.expo/
 hospital-app2/web-build/
