@@ -6,6 +6,8 @@ import {
   type TrackingCalibration,
 } from "../lib/coords/trackingCalibration";
 
+// Types for navigation data and state
+
 type NavDataState = {
   nodes: any | null;
   edges: any | null;
@@ -13,6 +15,9 @@ type NavDataState = {
   renderNodes: any | null;
   renderEdges: any | null;
   renderFloorplan: any | null;
+  version: string | null;
+  updatedAt: string | null;
+  source: string | null;
   isLoaded: boolean;
   validationErrors: string[];
 };
@@ -30,9 +35,11 @@ type RouteState = {
 type NavigationPreference = "stairs" | "elevator";
 type MapViewMode = "navigate" | "ar";
 export type TextSizePreset = "small" | "medium" | "large";
+type StartSource = "auto-entrance" | "manual-node" | "current-location";
 
 type NavigationUiState = {
   isStarted: boolean;
+  routeStartedAtMs: number | null;
   prefer: NavigationPreference;
   mapViewMode: MapViewMode;
   soundEnabled: boolean;
@@ -40,22 +47,22 @@ type NavigationUiState = {
   highContrastEnabled: boolean;
   activeStepIndex: number;
   navigationFloor: number | null;
-  hasDismissedHomeHero: boolean;
+  hasDismissedIntro: boolean;
   recentDestinationIds: string[];
 };
 
 type StartState = {
   nodeId: string | null;
   coords: [number, number] | null;
+  source: StartSource;
 };
 
-type LivePositionProvider = "none" | "simulated" | "optitrack";
+type LivePositionProvider = "none" | "optitrack";
 
 type LivePositionState = {
   provider: LivePositionProvider;
   coords: [number, number] | null;
   floor: number | null;
-  stepMeters: number;
   calibration: TrackingCalibration;
 };
 
@@ -71,37 +78,33 @@ type Store = {
   navigationUi: NavigationUiState;
 
   setNavData: (partial: Partial<NavDataState>) => void;
-  setStartNode: (nodeId: string) => void;
-  setStartCoords: (coords: [number, number]) => void;
+  setStartNode: (
+    nodeId: string,
+    source?: StartSource,
+    coords?: [number, number] | null
+  ) => void;
   setLivePositionProvider: (provider: LivePositionProvider) => void;
-  setLivePosition: (coords: [number, number] | null, floor?: number | null) => void;
   setLiveFloor: (floor: number | null) => void;
-  nudgeLivePosition: (delta: [number, number]) => void;
-  setLiveStepMeters: (stepMeters: number) => void;
-  resetLivePositionToStart: () => void;
-  setTrackingCalibration: (partial: Partial<TrackingCalibration>) => void;
   ingestTrackedSample: (coords: [number, number], floor?: number | null) => void;
 
   setDestinationId: (id: string) => void;
-  pushRecentDestination: (id: string) => void;
   setPostNavStartOverrideId: (id: string | null) => void;
   clearPostNavStartOverride: () => void;
 
   setRoute: (route: Partial<RouteState>) => void;
-  resetRoute: () => void;
   setNavigationStarted: (started: boolean) => void;
   setNavigationPreference: (prefer: NavigationPreference) => void;
   setMapViewMode: (mode: MapViewMode) => void;
-  toggleNavigationPreference: () => void;
   setSoundEnabled: (enabled: boolean) => void;
   setTextSize: (size: TextSizePreset) => void;
   setHighContrastEnabled: (enabled: boolean) => void;
   setActiveStepIndex: (index: number) => void;
   setNavigationFloor: (floor: number | null) => void;
-  setHomeHeroDismissed: (dismissed: boolean) => void;
+  setIntroDismissed: (dismissed: boolean) => void;
 };
 
-export const useNavStore = create<Store>((set, get) => ({
+export const useNavStore = create<Store>((set) => ({
+  // Navigation data loaded from backend or local fallback
   navData: {
     nodes: null,
     edges: null,
@@ -109,21 +112,25 @@ export const useNavStore = create<Store>((set, get) => ({
     renderNodes: null,
     renderEdges: null,
     renderFloorplan: null,
+    version: null,
+    updatedAt: null,
+    source: null,
     isLoaded: false,
     validationErrors: [],
   },
 
-  start: { nodeId: "n_hospital_entrance_f0", coords: null },
+  // Current start position, either set manually or from auto-detected entrance or current location
+  start: { nodeId: "n_hospital_entrance_f0", coords: null, source: "auto-entrance" },
   livePosition: {
     provider: "none",
     coords: null,
     floor: 0,
-    stepMeters: 1,
     calibration: DEFAULT_TRACKING_CALIBRATION,
   },
   destinationId: null,
   postNavStartOverrideId: null,
 
+  // Current route and navigation state
   route: {
     ok: false,
     geojson: null,
@@ -133,8 +140,10 @@ export const useNavStore = create<Store>((set, get) => ({
     summary: null,
     reason: null,
   },
+  // UI state for navigation screen
   navigationUi: {
     isStarted: false,
+    routeStartedAtMs: null,
     prefer: "stairs",
     mapViewMode: "navigate",
     soundEnabled: false,
@@ -142,74 +151,59 @@ export const useNavStore = create<Store>((set, get) => ({
     highContrastEnabled: false,
     activeStepIndex: 0,
     navigationFloor: 0,
-    hasDismissedHomeHero: false,
+    hasDismissedIntro: false,
     recentDestinationIds: [],
   },
+  
+  // Setters for updating the store
 
   setNavData: (partial) =>
     set((s) => ({
       navData: { ...s.navData, ...partial },
     })),
 
-  setStartNode: (nodeId) => set((s) => ({ start: { ...s.start, nodeId, coords: null } })),
-  setStartCoords: (coords) => set((s) => ({ start: { ...s.start, coords } })),
+  setStartNode: (nodeId, source = "manual-node", coords) =>
+    set((s) => ({
+      start: {
+        ...s.start,
+        nodeId,
+        source,
+        coords:
+          coords !== undefined
+            ? coords
+            : source === "auto-entrance"
+              ? null
+              : s.start.coords,
+      },
+    })),
   setLivePositionProvider: (provider) =>
-    set((s) => ({
-      livePosition: {
-        ...s.livePosition,
-        provider,
-        coords: provider === "none" ? null : s.livePosition.coords,
-      },
-    })),
-  setLivePosition: (coords, floor = null) =>
-    set((s) => ({
-      livePosition: {
-        ...s.livePosition,
-        coords,
-        floor: floor ?? s.livePosition.floor,
-      },
-    })),
+    set((s) => {
+      const nextCoords = provider === "none" ? null : s.livePosition.coords;
+      if (s.livePosition.provider === provider && s.livePosition.coords === nextCoords) {
+        return s;
+      }
+
+      return {
+        livePosition: {
+          ...s.livePosition,
+          provider,
+          coords: nextCoords,
+        },
+      };
+    }),
   setLiveFloor: (floor) =>
-    set((s) => ({
-      livePosition: {
-        ...s.livePosition,
-        floor,
-      },
-    })),
-  nudgeLivePosition: (delta) =>
     set((s) => {
-      const baseCoords = s.livePosition.coords || s.start.coords || [0, 0];
+      if (s.livePosition.floor === floor) {
+        return s;
+      }
+
       return {
         livePosition: {
           ...s.livePosition,
-          coords: [baseCoords[0] + delta[0], baseCoords[1] + delta[1]],
+          floor,
         },
       };
     }),
-  setLiveStepMeters: (stepMeters) =>
-    set((s) => ({
-      livePosition: { ...s.livePosition, stepMeters: Math.max(0.1, stepMeters) },
-    })),
-  resetLivePositionToStart: () =>
-    set((s) => {
-      const startNode = s.navData.nodes?.features?.find(
-        (feature: any) => feature.properties?.id === s.start.nodeId
-      );
-      return {
-        livePosition: {
-          ...s.livePosition,
-          coords: s.start.coords || startNode?.geometry?.coordinates || null,
-          floor: startNode?.properties?.floor ?? s.livePosition.floor,
-        },
-      };
-    }),
-  setTrackingCalibration: (partial) =>
-    set((s) => ({
-      livePosition: {
-        ...s.livePosition,
-        calibration: { ...s.livePosition.calibration, ...partial },
-      },
-    })),
   ingestTrackedSample: (coords, floor = null) =>
     set((s) => ({
       livePosition: {
@@ -231,61 +225,75 @@ export const useNavStore = create<Store>((set, get) => ({
         ].slice(0, 6),
       },
     })),
-  pushRecentDestination: (id) =>
-    set((s) => ({
-      navigationUi: {
-        ...s.navigationUi,
-        recentDestinationIds: [
-          id,
-          ...s.navigationUi.recentDestinationIds.filter((recentId) => recentId !== id),
-        ].slice(0, 6),
-      },
-    })),
   setPostNavStartOverrideId: (id) => set({ postNavStartOverrideId: id }),
   clearPostNavStartOverride: () => set({ postNavStartOverrideId: null }),
 
   setRoute: (partial) => set((s) => ({ route: { ...s.route, ...partial } })),
-  resetRoute: () =>
-    set({
-      route: {
-        ok: false,
-        geojson: null,
-        currentFloorGeojson: null,
-        futureFloorGeojson: null,
-        routeNodesGeojson: null,
-        summary: null,
-        reason: null,
-      },
-    }),
   setNavigationStarted: (started) =>
-    set((s) => ({
-      navigationUi: {
-        ...s.navigationUi,
-        isStarted: started,
-        activeStepIndex: started ? s.navigationUi.activeStepIndex : 0,
-      },
-    })),
+    set((s) => {
+      const nextRouteStartedAtMs = started ? s.navigationUi.routeStartedAtMs ?? Date.now() : null;
+      const nextActiveStepIndex = started ? s.navigationUi.activeStepIndex : 0;
+
+      if (
+        s.navigationUi.isStarted === started &&
+        s.navigationUi.routeStartedAtMs === nextRouteStartedAtMs &&
+        s.navigationUi.activeStepIndex === nextActiveStepIndex
+      ) {
+        return s;
+      }
+
+      return {
+        navigationUi: {
+          ...s.navigationUi,
+          isStarted: started,
+          routeStartedAtMs: nextRouteStartedAtMs,
+          activeStepIndex: nextActiveStepIndex,
+        },
+      };
+    }),
   setNavigationPreference: (prefer) =>
-    set((s) => ({ navigationUi: { ...s.navigationUi, prefer } })),
+    set((s) =>
+      s.navigationUi.prefer === prefer ? s : { navigationUi: { ...s.navigationUi, prefer } }
+    ),
   setMapViewMode: (mode) =>
-    set((s) => ({ navigationUi: { ...s.navigationUi, mapViewMode: mode } })),
-  toggleNavigationPreference: () =>
-    set((s) => ({
-      navigationUi: {
-        ...s.navigationUi,
-        prefer: s.navigationUi.prefer === "stairs" ? "elevator" : "stairs",
-      },
-    })),
+    set((s) =>
+      s.navigationUi.mapViewMode === mode ? s : { navigationUi: { ...s.navigationUi, mapViewMode: mode } }
+    ),
   setSoundEnabled: (enabled) =>
-    set((s) => ({ navigationUi: { ...s.navigationUi, soundEnabled: enabled } })),
+    set((s) =>
+      s.navigationUi.soundEnabled === enabled
+        ? s
+        : { navigationUi: { ...s.navigationUi, soundEnabled: enabled } }
+    ),
   setTextSize: (textSize) =>
-    set((s) => ({ navigationUi: { ...s.navigationUi, textSize } })),
+    set((s) =>
+      s.navigationUi.textSize === textSize
+        ? s
+        : { navigationUi: { ...s.navigationUi, textSize } }
+    ),
   setHighContrastEnabled: (enabled) =>
-    set((s) => ({ navigationUi: { ...s.navigationUi, highContrastEnabled: enabled } })),
+    set((s) =>
+      s.navigationUi.highContrastEnabled === enabled
+        ? s
+        : { navigationUi: { ...s.navigationUi, highContrastEnabled: enabled } }
+    ),
   setActiveStepIndex: (index) =>
-    set((s) => ({ navigationUi: { ...s.navigationUi, activeStepIndex: Math.max(0, index) } })),
+    set((s) => {
+      const nextIndex = Math.max(0, index);
+      return s.navigationUi.activeStepIndex === nextIndex
+        ? s
+        : { navigationUi: { ...s.navigationUi, activeStepIndex: nextIndex } };
+    }),
   setNavigationFloor: (floor) =>
-    set((s) => ({ navigationUi: { ...s.navigationUi, navigationFloor: floor } })),
-  setHomeHeroDismissed: (dismissed) =>
-    set((s) => ({ navigationUi: { ...s.navigationUi, hasDismissedHomeHero: dismissed } })),
+    set((s) =>
+      s.navigationUi.navigationFloor === floor
+        ? s
+        : { navigationUi: { ...s.navigationUi, navigationFloor: floor } }
+    ),
+  setIntroDismissed: (dismissed) =>
+    set((s) =>
+      s.navigationUi.hasDismissedIntro === dismissed
+        ? s
+        : { navigationUi: { ...s.navigationUi, hasDismissedIntro: dismissed } }
+    ),
 }));

@@ -24,7 +24,7 @@ export const DEFAULT_TRACKING_CALIBRATION: TrackingCalibration = {
   flipY: false,
 };
 
-//export const DEFAULT_TRACKING_CALIBRATION: TrackingCalibration = {
+//export const OPTITRACK_TRACKING_CALIBRATION: TrackingCalibration = {
 // sourceOriginX: 0,
   //sourceOriginY: 0,
 //  offsetX: 0.4246,
@@ -37,6 +37,7 @@ export const DEFAULT_TRACKING_CALIBRATION: TrackingCalibration = {
 //  flipY: false,
 // };
 
+// Converts raw tracker coordinates into the hospital's local map coordinates.ç
 export function applyTrackingCalibration(
   input: [number, number],
   calibration: TrackingCalibration
@@ -54,10 +55,13 @@ export function applyTrackingCalibration(
     flipY,
   } = calibration;
 
+  // Flips are applied as sign changes so they compose cleanly with scaling.
   const flipSignX = flipX ? -1 : 1;
   const flipSignY = flipY ? -1 : 1;
+
   const scaledX = (input[0] - sourceOriginX) * scaleX * scale * flipSignX;
   const scaledY = (input[1] - sourceOriginY) * scaleY * scale * flipSignY;
+
   const radians = (rotationDeg * Math.PI) / 180;
   const cos = Math.cos(radians);
   const sin = Math.sin(radians);
@@ -65,8 +69,5 @@ export function applyTrackingCalibration(
   const rotatedX = scaledX * cos - scaledY * sin;
   const rotatedY = scaledX * sin + scaledY * cos;
 
-  return [
-    rotatedX + offsetX,
-    rotatedY + offsetY,
-  ];
+  return [rotatedX + offsetX, rotatedY + offsetY];
 }

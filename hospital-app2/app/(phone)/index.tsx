@@ -5,11 +5,12 @@ import { AppPalette } from "../../constants/theme";
 import { useNavStore } from "../../store/navStore";
 import SearchScreen from "./search";
 
-function HomeHero() {
-  const setHomeHeroDismissed = useNavStore((s) => s.setHomeHeroDismissed);
+function IntroScreen() {
+  const hideIntro = useNavStore((state) => state.setIntroDismissed);
 
   return (
     <View style={styles.page}>
+      {/* Intro */}
       <View style={styles.hero}>
         <Text style={styles.title}>PRESENTAMOS UNA</Text>
         <Text style={styles.title}>FORMA MAS FACIL</Text>
@@ -20,12 +21,13 @@ function HomeHero() {
       <Pressable
         style={styles.btn}
         onPress={() => {
-          setHomeHeroDismissed(true);
+          hideIntro(true);
         }}
       >
         <Text style={styles.btnText}>COMENZAR</Text>
       </Pressable>
 
+      {/* Settings entry in case they want to change some accessibility settings */}
       <Pressable onPress={() => router.push("/settings")}>
         <Text style={styles.linkText}>Ajustes</Text>
       </Pressable>
@@ -34,53 +36,41 @@ function HomeHero() {
 }
 
 export default function Home() {
-  const hasDismissedHomeHero = useNavStore((s) => s.navigationUi.hasDismissedHomeHero);
+  const introWasClosed = useNavStore((state) => state.navigationUi.hasDismissedIntro);
 
-  if (hasDismissedHomeHero) {
+  // Dont show again if it was already closed
+  if (introWasClosed) {
     return <SearchScreen />;
   }
-
-  return <HomeHero />;
+  return <IntroScreen />;
 }
 
 const styles = StyleSheet.create({
-  page: {
-    flex: 1,
-    paddingHorizontal: 28,
-    paddingVertical: 40,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: AppPalette.primary,
-  },
-  hero: {
-    alignItems: "center",
-    gap: 26,
-    marginBottom: 44,
-  },
-  title: {
-    fontSize: 31,
-    fontWeight: "400",
-    color: AppPalette.background,
-    textAlign: "center",
-  },
-  btn: {
-    backgroundColor: AppPalette.background,
-    paddingHorizontal: 22,
-    paddingVertical: 14,
-    borderRadius: 24,
-    alignItems: "center",
-    minWidth: 248,
-    marginBottom: 18,
-  },
-  btnText: {
-    color: AppPalette.primary,
-    fontWeight: "800",
-    fontSize: 28,
-  },
-  linkText: {
-    color: AppPalette.background,
-    fontWeight: "600",
-    fontSize: 15,
-    textDecorationLine: "underline",
-  },
+  page: { 
+    flex: 1, 
+    paddingHorizontal: 28, 
+    paddingVertical: 40, 
+    justifyContent: "center", 
+    alignItems: "center", 
+    backgroundColor: AppPalette.primary },
+  hero: { alignItems: "center", gap: 26, marginBottom: 44 },
+  title: { 
+    fontSize: 31, 
+    fontWeight: "400", 
+    color: AppPalette.background, 
+    textAlign: "center" },
+  btn: { 
+    backgroundColor: AppPalette.background, 
+    paddingHorizontal: 22, 
+    paddingVertical: 14, 
+    borderRadius: 24, 
+    alignItems: "center", 
+    minWidth: 248, 
+    marginBottom: 18 },
+  btnText: { color: AppPalette.primary, fontWeight: "800", fontSize: 28 },
+  linkText: { 
+    color: AppPalette.background, 
+    fontWeight: "600", 
+    fontSize: 15, 
+    textDecorationLine: "underline" },
 });
