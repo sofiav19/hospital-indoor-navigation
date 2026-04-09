@@ -8,6 +8,7 @@ from flask import Flask, jsonify, request
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 ENV_FILE = BASE_DIR / ".env"
+NAV_DATA_VERSION = "Marzo 2026, version 1"
 
 def load_local_env():
     if not ENV_FILE.exists():
@@ -32,12 +33,12 @@ if not DATABASE_URL:
 
 app = Flask(__name__)
 
-def init_telemetry_table():
+def init_monitoring_table():
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                CREATE TABLE IF NOT EXISTS telemetry_events (
+                CREATE TABLE IF NOT EXISTS monitoring_events (
                   id TEXT PRIMARY KEY,
                   event_name TEXT NOT NULL,
                   event_timestamp TIMESTAMPTZ NOT NULL,
@@ -51,7 +52,7 @@ def init_telemetry_table():
                 """
             )
 
-def save_telemetry_event(event):
+def save_monitoring_event(event):
     event_id = str(event.get("id") or f"evt-{int(datetime.now().timestamp() * 1000)}")
     event_name = str(event.get("name") or event.get("event_name") or "unknown")
     event_timestamp = str(event.get("timestamp") or datetime.now(timezone.utc).isoformat())
@@ -72,7 +73,7 @@ def save_telemetry_event(event):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO telemetry_events (
+                INSERT INTO monitoring_events (
                   id,
                   event_name,
                   event_timestamp,
@@ -118,10 +119,19 @@ def health():
 
 @app.route("/api/nav-data", methods=["GET"])
 def nav_data():
+    nav_files = [
+        DATA_DIR / "nodes_hospital.json",
+        DATA_DIR / "edges_hospital.json",
+        DATA_DIR / "floorplan_c.json",
+    ]
+    updated_at = max(nav_file.stat().st_mtime for nav_file in nav_files)
+
     return jsonify(
         {
             "ok": True,
             "source": "backend-data",
+            "version": NAV_DATA_VERSION,
+            "updatedAt": datetime.fromtimestamp(updated_at, tz=timezone.utc).isoformat(),
             "nodes": json.loads((DATA_DIR / "nodes_hospital.json").read_text(encoding="utf-8")),
             "edges": json.loads((DATA_DIR / "edges_hospital.json").read_text(encoding="utf-8")),
             "floorplan": json.loads((DATA_DIR / "floorplan_c.json").read_text(encoding="utf-8")),
@@ -132,14 +142,14 @@ def nav_data():
 def directory():
     return jsonify(json.loads((DATA_DIR / "hospitalDirectory.json").read_text(encoding="utf-8")))
 
-@app.route("/api/telemetry", methods=["POST"])
-def telemetry_ingest():
+@app.route("/api/monitoring", methods=["POST"])
+def monitoring_ingest():
     event = request.get_json(silent=True) or {}
-    save_telemetry_event(event)
+    save_monitoring_event(event)
     return jsonify({"ok": True, "stored": True})
 
-@app.route("/api/telemetry", methods=["GET"])
-def telemetry_list():
+@app.route("/api/monitoring", methods=["GET"])
+def monitoring_list():
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -154,7 +164,7 @@ def telemetry_list():
                   retry_count,
                   last_error,
                   received_at
-                FROM telemetry_events
+                FROM monitoring_events
                 ORDER BY received_at DESC
                 LIMIT 500
                 """
@@ -171,6 +181,52 @@ def telemetry_list():
 
     return jsonify({"ok": True, "events": events})
 
+@app.route("/api/monitoring/route-performance", methods=["GET"])
+def monitoring_route_performance():
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                WITH route_events AS (
+                  SELECT
+                    CASE
+                      WHEN COALESCE(payload->>'routeTimingCategory', '') IN ('initial-route', 'reroute')
+                        THEN payload->>'routeTimingCategory'
+                      WHEN COALESCE(payload->>'reason', '') IN ('recalculating', 'preference-change', 'floor-switch')
+                        THEN 'reroute'
+                      ELSE 'initial-route'
+                    END AS route_timing_category,
+                    (payload->>'computeDurationMs')::DOUBLE PRECISION AS compute_duration_ms
+                  FROM monitoring_events
+                  WHERE event_name = 'route.computed'
+                    AND payload ? 'computeDurationMs'
+                    AND payload->>'computeDurationMs' ~ '^[0-9]+(\\.[0-9]+)?$'
+                )
+                SELECT
+                  route_timing_category,
+                  COUNT(*)::INT AS sample_count,
+                  ROUND(
+                    percentile_cont(0.5) WITHIN GROUP (ORDER BY compute_duration_ms)::NUMERIC,
+                    2
+                  )::DOUBLE PRECISION AS median_compute_duration_ms
+                FROM route_events
+                GROUP BY route_timing_category
+                """
+            )
+
+            metrics = {
+                "initial-route": {"medianComputeDurationMs": None, "sampleCount": 0},
+                "reroute": {"medianComputeDurationMs": None, "sampleCount": 0},
+            }
+
+            for category, sample_count, median_compute_duration_ms in cur.fetchall():
+                metrics[category] = {
+                    "medianComputeDurationMs": median_compute_duration_ms,
+                    "sampleCount": sample_count,
+                }
+
+    return jsonify({"ok": True, "metrics": metrics})
+
 if __name__ == "__main__":
-    init_telemetry_table()
+    init_monitoring_table()
     app.run(host="0.0.0.0", port=PORT)
