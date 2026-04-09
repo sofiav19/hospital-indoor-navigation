@@ -1,243 +1,205 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { View, Text, Pressable, FlatList, StyleSheet, TextInput, Image } from "react-native";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavStore } from "../../store/navStore";
 import { AppPalette, useAppAppearance } from "../../constants/theme";
 import { computeRoute } from "../../lib/route/routeEngine";
-import { trackEvent } from "../../lib/telemetry";
-import {
-  DIRECTORY_CATEGORIES,
-  HOSPITAL_DIRECTORY,
-  normalizeSearchValue,
-  type DirectoryCategoryKey,
-} from "../../lib/hospitalDirectory";
+import { distanceMeters } from "../../lib/route/routeHelpers";
+import { trackEvent } from "../../lib/monitoring";
+import { DIRECTORY_CATEGORIES, HOSPITAL_DIRECTORY, normalizeSearchValue, type DirectoryCategoryKey} from "../../lib/hospitalDirectory";
 
-function getBuildingLabel(destinationNodeId: string) {
-  if (destinationNodeId.includes("urg")) return "Edificio Urgencias";
-  if (destinationNodeId.includes("wr")) return "Edificio Servicios";
-  return "Edificio General";
+// Metadata information for each entry
+function getEntrySubtitle(item: any) {
+  if (item.category === "entrances") {
+    return `${item.street || "Entrada"} · Planta ${item.floor}`;}
+  let info = `Planta ${item.floor}`;
+  if (item.roomNumber) info += ` · Sala ${item.roomNumber}`;
+  if (item.doctor) info += ` · ${item.doctor}`;
+  return info;
 }
 
-function distanceMeters(a: [number, number], b: [number, number]) {
-  const dx = a[0] - b[0];
-  const dy = a[1] - b[1];
-  return Math.sqrt(dx * dx + dy * dy);
+// Search across all entry fields to find matches
+function getEntrySearchText(entry: any) {
+  return [entry.name, entry.doctor || "", entry.roomNumber || "", entry.street || "", `planta ${entry.floor}`, ...entry.keywords]
+    .map((value) => normalizeSearchValue(value))
+    .join(" ");
 }
 
 export default function Search() {
   const { palette } = useAppAppearance();
-  const navData = useNavStore((s) => s.navData);
-  const start = useNavStore((s) => s.start);
-  const livePosition = useNavStore((s) => s.livePosition);
-  const postNavStartOverrideId = useNavStore((s) => s.postNavStartOverrideId);
-  const setDestinationId = useNavStore((s) => s.setDestinationId);
-  const setStartNode = useNavStore((s) => s.setStartNode);
-  const setNavigationStarted = useNavStore((s) => s.setNavigationStarted);
-  const recentDestinationIds = useNavStore((s) => s.navigationUi.recentDestinationIds);
-  const prefer = useNavStore((s) => s.navigationUi.prefer);
+  // Take these values from the navigation store
+  const navData = useNavStore((state) => state.navData);
+  const livePosition = useNavStore((state) => state.livePosition);
+  const setDestinationId = useNavStore((state) => state.setDestinationId);
+  const setStartNode = useNavStore((state) => state.setStartNode);
+  const setNavigationStarted = useNavStore((state) => state.setNavigationStarted);
+  const recentIds = useNavStore((state) => state.navigationUi.recentDestinationIds);
+  const routePreference = useNavStore((state) => state.navigationUi.prefer);
   const [query, setQuery] = useState("");
-  const [focusedCategory, setFocusedCategory] = useState<DirectoryCategoryKey | null>(null);
+  const [selectedCategoryKey, setSelectedCategoryKey] = useState<DirectoryCategoryKey | null>(null);
+  const selectionStartedAt = useRef(Date.now());
 
+  // Show only destinations that exist in the current map
   const availableNodeIds = useMemo(() => {
-    const features = navData.nodes?.features || [];
-    return new Set(features.map((feature: any) => feature.properties?.id));
+    const list = navData.nodes?.features || [];
+    return new Set(list.map((item: any) => item.properties?.id));
   }, [navData.nodes]);
 
-  const availableEntries = useMemo(() => {
-    return HOSPITAL_DIRECTORY.filter((entry) => availableNodeIds.has(entry.destinationNodeId));
-  }, [availableNodeIds]);
+  const entries = useMemo(() => HOSPITAL_DIRECTORY.filter((entry) => availableNodeIds.has(entry.destinationNodeId)), [availableNodeIds]);
 
-  const availableCategories = useMemo(() => {
-    const categoriesWithData = new Set<DirectoryCategoryKey>(["recent"]);
-    availableEntries.forEach((entry) => categoriesWithData.add(entry.category));
-    return DIRECTORY_CATEGORIES.filter((category) => categoriesWithData.has(category.key));
-  }, [availableEntries]);
+  // Filters categories to the ones that have destinations right now
+  const categories = useMemo(() => {
+    const keys = new Set<DirectoryCategoryKey>(["recent"]);
+    entries.forEach((entry) => keys.add(entry.category));
+    return DIRECTORY_CATEGORIES.filter((category) => keys.has(category.key));
+  }, [entries]);
 
+  // Order categories
   const browseCategories = useMemo(() => {
-    const preferredOrder: DirectoryCategoryKey[] = ["specialties", "diagnostics", "entrances", "services", "recent"];
-    const categoryMap = new Map(availableCategories.map((category) => [category.key, category]));
-    return preferredOrder
-      .map((key) => categoryMap.get(key))
+    const order: DirectoryCategoryKey[] = ["specialties", "diagnostics", "entrances", "services", "recent"];
+    const map = new Map(categories.map((category) => [category.key, category]));
+
+    return order
+      .map((key) => map.get(key))
       .filter((category): category is NonNullable<typeof category> => Boolean(category));
-  }, [availableCategories]);
+  }, [categories]);
 
+  // Show recent destinations by recency, but only if they are still available
   const recentEntries = useMemo(() => {
-    const entriesByDestinationId = new Map(
-      availableEntries.map((entry) => [entry.destinationNodeId, entry])
-    );
-
-    return recentDestinationIds
-      .map((destinationId) => entriesByDestinationId.get(destinationId))
+    const map = new Map(entries.map((entry) => [entry.destinationNodeId, entry]));
+    return recentIds
+      .map((id) => map.get(id))
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
-  }, [availableEntries, recentDestinationIds]);
+  }, [entries, recentIds]);
 
-  const entranceNodeIds = useMemo(() => {
-    return availableEntries
+  // Save entrances to later decide which is the best one to start the route from
+  const entranceIds = useMemo(() => {
+    return entries
       .filter((entry) => entry.category === "entrances")
       .map((entry) => entry.destinationNodeId);
-  }, [availableEntries]);
+  }, [entries]);
 
-  const getBestEntranceId = (destinationNodeId: string) => {
-    if (!navData.nodes || !navData.edges || !entranceNodeIds.length) return null;
+  // Make top entries list
+  const topEntries = useMemo(() => {
+    const order: DirectoryCategoryKey[] = ["specialties", "diagnostics", "entrances", "services"];
+    const map = new Map<DirectoryCategoryKey, typeof entries>();
+    const used = new Set<string>();
+    const finalList: typeof entries = [];
 
-    let bestEntranceId: string | null = null;
-    let bestScore = Infinity;
-    const evaluations: {
-      entranceNodeId: string;
-      ok: boolean;
-      reason: string | null;
-      approachMeters: number | null;
-      routeMeters: number | null;
-      totalScore: number | null;
-    }[] = [];
+    order.forEach((key) => map.set(key, []));
 
-    for (const entranceNodeId of entranceNodeIds) {
-      const entranceFeature =
-        navData.nodes.features?.find((feature: any) => feature.properties?.id === entranceNodeId) || null;
-      const entranceCoords = entranceFeature?.geometry?.coordinates as [number, number] | undefined;
-      const result = computeRoute(navData.nodes, navData.edges, entranceNodeId, destinationNodeId, { prefer });
-
-      const approachMeters =
-        livePosition.coords && Array.isArray(entranceCoords)
-          ? distanceMeters(livePosition.coords, entranceCoords)
-          : 0;
-
-      if (!result.ok) {
-        evaluations.push({
-          entranceNodeId,
-          ok: false,
-          reason: result.reason || null,
-          approachMeters: Number.isFinite(approachMeters) ? Math.round(approachMeters) : null,
-          routeMeters: null,
-          totalScore: null,
-        });
-        continue;
-      }
-
-      const routeMeters = result.summary?.totalMeters ?? Infinity;
-      const totalScore = approachMeters + routeMeters;
-      evaluations.push({
-        entranceNodeId,
-        ok: true,
-        reason: null,
-        approachMeters: Number.isFinite(approachMeters) ? Math.round(approachMeters) : null,
-        routeMeters: Number.isFinite(routeMeters) ? routeMeters : null,
-        totalScore: Number.isFinite(totalScore) ? Math.round(totalScore) : null,
-      });
-
-      if (totalScore < bestScore) {
-        bestScore = totalScore;
-        bestEntranceId = entranceNodeId;
-      }
-    }
-
-    console.log("[EntrancePicker] evaluated entrances", {
-      destinationNodeId,
-      prefer,
-      livePositionProvider: livePosition.provider,
-      liveCoords: livePosition.coords,
-      startNodeId: start.nodeId,
-      postNavStartOverrideId,
-      evaluations,
-      chosenEntranceId: bestEntranceId,
-      chosenScore: Number.isFinite(bestScore) ? Math.round(bestScore) : null,
-      note: "Current implementation compares current-position-to-entrance distance plus entrance-to-destination route length.",
+    entries.forEach((entry) => {
+      const list = map.get(entry.category);
+      if (list) list.push(entry);
     });
-
-    return bestEntranceId;
-  };
-
-  const topDestinations = useMemo(() => {
-    const categoryOrder: DirectoryCategoryKey[] = ["specialties", "diagnostics", "entrances", "services"];
-    const buckets = new Map<DirectoryCategoryKey, typeof availableEntries>();
-
-    categoryOrder.forEach((key) => buckets.set(key, []));
-
-    availableEntries.forEach((entry) => {
-      const bucket = buckets.get(entry.category);
-      if (bucket) bucket.push(entry);
-    });
-
-    buckets.forEach((bucket) => {
-      bucket.sort((a, b) => {
+    // after making the groups of each category, sort them by floor and name
+    map.forEach((list) => {
+      list.sort((a, b) => {
         if (a.floor !== b.floor) return b.floor - a.floor;
         return a.name.localeCompare(b.name);
       });
     });
 
-    const seenByName = new Set<string>();
-    const mixed: typeof availableEntries = [];
-
-    while (mixed.length < 10) {
-      let addedInRound = false;
-
-      for (const category of categoryOrder) {
-        const bucket = buckets.get(category);
-        if (!bucket?.length) continue;
-
-        const next = bucket.shift();
-        if (!next) continue;
-
-        const dedupeKey = `${next.category}-${normalizeSearchValue(next.name)}`;
-        if (seenByName.has(dedupeKey)) continue;
-
-        seenByName.add(dedupeKey);
-        mixed.push(next);
-        addedInRound = true;
-
-        if (mixed.length >= 10) break;
+    while (finalList.length < 10) {
+      let added = false;
+      for (const key of order) {
+        const list = map.get(key);
+        if (!list?.length) continue;
+        const item = list.shift();
+        if (!item) continue;
+        // avoid duplicates
+        const nameKey = `${item.category}-${normalizeSearchValue(item.name)}`;
+        if (used.has(nameKey)) continue;
+        used.add(nameKey);
+        finalList.push(item);
+        added = true;
+        if (finalList.length >= 10) break;
       }
-
-      if (!addedInRound) break;
+      if (!added) break;
     }
+    return finalList;
+  }, [entries]);
 
-    return mixed;
-  }, [availableEntries]);
-
+  // Selected category for title and placeholder
   const selectedCategory = useMemo(() => {
-    return availableCategories.find((category) => category.key === (focusedCategory || availableCategories[0]?.key || "specialties"));
-  }, [focusedCategory, availableCategories]);
+    return categories.find((category) => category.key === (selectedCategoryKey || categories[0]?.key || "specialties"));
+  }, [selectedCategoryKey, categories]);
 
-  const visibleEntries = useMemo(() => {
-    const normalizedQuery = normalizeSearchValue(query);
-    const activeCategoryKey = focusedCategory || browseCategories[0]?.key || "specialties";
+  // Final list depending on category or search query
+  const shownEntries = useMemo(() => {
+    const text = normalizeSearchValue(query);
+    const currentCategory = selectedCategoryKey || browseCategories[0]?.key || "specialties";
+    if (!text) {
+      if (!selectedCategoryKey) return topEntries;
+      if (currentCategory === "recent") return recentEntries;
+      return entries.filter((entry) => entry.category === currentCategory);}
 
-    if (!normalizedQuery) {
-      if (!focusedCategory) {
-        return topDestinations;
-      }
+    if (currentCategory === "recent") {
+      return recentEntries.filter((entry) => getEntrySearchText(entry).includes(text));}
 
-      if (activeCategoryKey === "recent") {
-        return recentEntries;
-      }
-
-      return availableEntries.filter((entry) => entry.category === activeCategoryKey);
-    }
-
-    if (activeCategoryKey === "recent") {
-      return recentEntries.filter((entry) => {
-        const haystack = [entry.name, entry.doctor || "", entry.roomNumber || "", entry.street || "", `planta ${entry.floor}`, ...entry.keywords]
-          .map((value) => normalizeSearchValue(value))
-          .join(" ");
-
-        return haystack.includes(normalizedQuery);
-      });
-    }
-
-    return availableEntries.filter((entry) => {
-      const inCategory = focusedCategory ? entry.category === focusedCategory : true;
-      if (!inCategory) return false;
-
-      const haystack = [entry.name, entry.doctor || "", entry.roomNumber || "", entry.street || "", `planta ${entry.floor}`, ...entry.keywords]
-        .map((value) => normalizeSearchValue(value))
-        .join(" ");
-
-      return haystack.includes(normalizedQuery);
+    return entries.filter((entry) => {
+      const sameCat = selectedCategoryKey ? entry.category === selectedCategoryKey : true;
+      if (!sameCat) return false;
+      return getEntrySearchText(entry).includes(text);
     });
-  }, [availableEntries, browseCategories, focusedCategory, query, recentEntries, topDestinations]);
+  }, [entries, browseCategories, selectedCategoryKey, query, recentEntries, topEntries]);
+
+  // Go back to the default state when removing a category
+  const resetSearch = () => {
+    setSelectedCategoryKey(null);
+    setQuery("");
+    selectionStartedAt.current = Date.now();
+  };
+
+  // Choose the best entrance to start the route from
+  const pickBestEntrance = (destinationId: string) => {
+    if (!navData.nodes || !navData.edges || !entranceIds.length) return null;
+    let bestId: string | null = null;
+    let bestScore = Infinity;
+
+    for (const entranceId of entranceIds) {
+      const entranceData = navData.nodes.features?.find((item: any) => item.properties?.id === entranceId) || null;
+      const entranceCoords = entranceData?.geometry?.coordinates as [number, number] | undefined;
+      const route = computeRoute(navData.nodes, navData.edges, entranceId, destinationId, { prefer: routePreference });
+      const outMeters = livePosition.coords && Array.isArray(entranceCoords) ? distanceMeters(livePosition.coords, entranceCoords) : 0;
+      const routeMeters = route.summary?.totalMeters ?? Infinity;
+      const total = outMeters + routeMeters;
+      if (total < bestScore) {
+        bestScore = total;
+        bestId = entranceId;
+      }
+    }
+    return bestId;
+  };
+
+  // Select destination for navigation and track when a destination is selected
+  const chooseDestination = (item: any) => {
+    setNavigationStarted(false);
+    const bestId = pickBestEntrance(item.destinationNodeId);
+
+    if (bestId) { setStartNode(bestId, "auto-entrance", null);}
+
+    trackEvent("navigation.destination_selected", {
+      destinationId: item.destinationNodeId,
+      destinationName: item.name,
+      category: item.category,
+      roomNumber: item.roomNumber || null,
+      recommendedEntranceId: bestId,
+      livePositionProvider: livePosition.provider,
+      selectionDurationSeconds: Math.round((Date.now() - selectionStartedAt.current) / 1000),
+      queryText: query.trim() || null,
+      focusedCategory: selectedCategoryKey || null,
+      resultsCount: shownEntries.length,
+    });
+
+    selectionStartedAt.current = Date.now();
+    setDestinationId(item.destinationNodeId);
+    router.push("/navigate");
+  };
 
   if (!navData.isLoaded) return <View style={[styles.page, { backgroundColor: palette.background }]}><Text style={{ color: palette.textPrimary }}>Loading...</Text></View>;
+
   if (navData.validationErrors.length) {
     return (
       <View style={[styles.page, { backgroundColor: palette.background }]}>
@@ -249,6 +211,7 @@ export default function Search() {
 
   return (
     <View style={[styles.page, { backgroundColor: palette.background }]}>
+      {/* Heading with name and Logo */}
       <View style={styles.headerWrap}>
         <View style={styles.brandMark}>
           <Image source={require("../../assets/icons/logo.png")} style={styles.brandLogo} resizeMode="contain" />
@@ -259,27 +222,19 @@ export default function Search() {
         </Text>
       </View>
 
+      {/* Search bar and back button if already in a category */}
       <View style={styles.searchRow}>
-        {focusedCategory ? (
-          <Pressable
-            onPress={() => {
-              setFocusedCategory(null);
-              setQuery("");
-            }}
-            style={styles.backButton}
-          >
+        {selectedCategoryKey ? (
+          <Pressable onPress={() => resetSearch()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={34} color={palette.textPrimary} />
           </Pressable>
         ) : null}
+
         <View style={[styles.searchInputWrap, { backgroundColor: palette.surfaceAlt }]}>
           <TextInput
             value={query}
             onChangeText={setQuery}
-            placeholder={
-              focusedCategory
-                ? selectedCategory?.searchPlaceholder || "Buscar"
-                : "A donde va?"
-            }
+            placeholder={selectedCategoryKey ? selectedCategory?.searchPlaceholder || "Buscar" : "A donde va?"}
             placeholderTextColor="rgba(29, 27, 32, 0.65)"
             style={[styles.searchInput, { color: palette.textPrimary }]}
           />
@@ -287,8 +242,9 @@ export default function Search() {
         </View>
       </View>
 
-      {!focusedCategory ? (
+      {!selectedCategoryKey ? (
         <>
+          {/* Buttons for each category */}
           <Text style={[styles.sectionHeading, { color: palette.textSectionTitles }]}>Explorar por tipo</Text>
           <FlatList
             data={browseCategories}
@@ -301,8 +257,9 @@ export default function Search() {
               <Pressable
                 style={[styles.chip, { borderColor: palette.primary }]}
                 onPress={() => {
-                  setFocusedCategory(category.key);
+                  setSelectedCategoryKey(category.key);
                   setQuery("");
+                  selectionStartedAt.current = Date.now();
                 }}
               >
                 <Text style={[styles.chipText, { color: palette.textPrimary }]}>{category.chipLabel}</Text>
@@ -313,61 +270,26 @@ export default function Search() {
       ) : null}
 
       <Text style={[styles.sectionHeading, { color: palette.textSectionTitles }]}>
-        {focusedCategory
-          ? selectedCategory?.sectionTitle || "Directorio"
-          : "Top Destinations"}
+        {selectedCategoryKey ? selectedCategory?.sectionTitle || "Directorio" : "Top Destinations"}
       </Text>
+
+      {/* Search results */}
       <FlatList
-        data={visibleEntries}
+        data={shownEntries}
         style={styles.destinationList}
         contentContainerStyle={styles.listContent}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <Pressable
-            style={[styles.item, { borderColor: palette.lines, backgroundColor: palette.lists }]}
-            onPress={() => {
-              setNavigationStarted(false);
-              console.log("[EntrancePicker] destination selected", {
-                destinationNodeId: item.destinationNodeId,
-                livePositionProvider: livePosition.provider,
-                liveCoords: livePosition.coords,
-                startNodeId: start.nodeId,
-                postNavStartOverrideId,
-              });
-              const bestEntranceId = getBestEntranceId(item.destinationNodeId);
-              if (bestEntranceId) {
-                console.log("[EntrancePicker] applying entrance start node", {
-                  destinationNodeId: item.destinationNodeId,
-                  bestEntranceId,
-                });
-                setStartNode(bestEntranceId);
-              }
-              trackEvent("navigation.destination_selected", {
-                destinationId: item.destinationNodeId,
-                destinationName: item.name,
-                category: item.category,
-                roomNumber: item.roomNumber || null,
-                recommendedEntranceId: bestEntranceId,
-                livePositionProvider: livePosition.provider,
-                liveCoords: livePosition.coords,
-              });
-              setDestinationId(item.destinationNodeId);
-              router.push("/navigate");
-            }}
-          >
+          <Pressable style={[styles.item, { borderColor: palette.lines, backgroundColor: palette.lists }]} onPress={() => chooseDestination(item)}>
             <Text style={[styles.itemText, { color: palette.textPrimary }]}>{item.name}</Text>
             <Text style={[styles.itemMeta, { color: palette.textPrimary }]}>
-              {item.category === "entrances"
-                ? `${item.street || getBuildingLabel(item.destinationNodeId)} · Planta ${item.floor}`
-                : `${getBuildingLabel(item.destinationNodeId)} · Planta ${item.floor}${item.roomNumber ? ` · Sala ${item.roomNumber}` : ""}${item.doctor ? ` · ${item.doctor}` : ""}`}
+              {getEntrySubtitle(item)}
             </Text>
           </Pressable>
         )}
         ListEmptyComponent={
           <Text style={[styles.emptyText, { color: palette.textPrimary }]}>
-            {focusedCategory === "recent"
-              ? "Todavia no hay destinos recientes."
-              : "No hay resultados para esa busqueda."}
+            {selectedCategoryKey === "recent" ? "Todavia no hay destinos recientes." : "No hay resultados para esa busqueda."}
           </Text>
         }
       />
@@ -384,20 +306,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 14,
   },
-  brandMark: {
-    width: 54,
-    height: 54,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  brandLogo: {
-    width: 68,
-    height: 68,
-  },
-  brandTitle: {
-    flex: 1,
-    lineHeight: 38,
-  },
+  brandMark: { width: 54, height: 54, alignItems: "center", justifyContent: "center" },
+  brandLogo: { width: 68, height: 68 },
+  brandTitle: { flex: 1, lineHeight: 38 },
   brandTitlePrefix: {
     fontSize: 24,
     fontWeight: "600",
@@ -424,13 +335,8 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 16,
     marginTop: 4,
-    paddingHorizontal: 14,
-  },
-  backButton: {
-    width: 54,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+    paddingHorizontal: 14,},
+  backButton: { width: 54, alignItems: "center", justifyContent: "center" },
   searchInputWrap: {
     flex: 1,
     flexDirection: "row",
@@ -438,14 +344,8 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     backgroundColor: AppPalette.surfaceAlt,
     paddingHorizontal: 18,
-    minHeight: 66,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 14,
-    color: AppPalette.textPrimary,
-    paddingRight: 14,
-  },
+    minHeight: 66 },
+  searchInput: { flex: 1, fontSize: 14, color: AppPalette.textPrimary, paddingRight: 14 },
   chipsList: { maxHeight: 74, flexGrow: 0 },
   chipsListContent: { gap: 12, paddingHorizontal: 14, paddingRight: 22 },
   chip: {
@@ -455,13 +355,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 10,
     minHeight: 56,
-    justifyContent: "center",
-  },
-  chipText: {
-    fontSize: 20,
-    color: AppPalette.textPrimary,
-    fontWeight: "500",
-  },
+    justifyContent: "center" },
+  chipText: { fontSize: 20, color: AppPalette.textPrimary, fontWeight: "500" },
   destinationList: { flex: 1 },
   listContent: { paddingBottom: 10 },
   item: {
@@ -470,24 +365,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: AppPalette.lines,
     borderRadius: 0,
-    backgroundColor: AppPalette.lists,
-  },
-  itemText: {
-    color: AppPalette.textPrimary,
-    fontSize: 20,
-    fontWeight: "500",
-    lineHeight: 26,
-  },
-  itemMeta: {
-    color: "rgba(29, 27, 32, 0.82)",
-    fontSize: 16,
-    lineHeight: 22,
-    marginTop: 4,
-  },
-  emptyText: {
-    color: "rgba(29, 27, 32, 0.65)",
-    paddingHorizontal: 22,
-    paddingTop: 12,
-    fontSize: 14,
-  },
+    backgroundColor: AppPalette.lists },
+  itemText: { color: AppPalette.textPrimary, fontSize: 20, fontWeight: "500", lineHeight: 26 },
+  itemMeta: { color: "rgba(29, 27, 32, 0.82)", fontSize: 16, lineHeight: 22, marginTop: 4 },
+  emptyText: { color: "rgba(29, 27, 32, 0.65)", paddingHorizontal: 22, paddingTop: 12, fontSize: 14 },
 });

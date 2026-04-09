@@ -21,12 +21,13 @@ type EdgeRec = {
 };
 
 function distanceMetersApprox(a: [number, number], b: [number, number]) {
-    if (COORD_MODE === "local") {
+  // Use Euclidean distance in local coordinates
+  if (COORD_MODE === "local") {
     const dx = a[0] - b[0];
     const dy = a[1] - b[1];
     return Math.sqrt(dx * dx + dy * dy);
   }
-
+  // Fallback to when the graph is built with lng/lat coordinates
   const avgLatRad = (((a[1] + b[1]) / 2) * Math.PI) / 180;
   const metersPerDegLat = 111_320;
   const metersPerDegLon = metersPerDegLat * Math.cos(avgLatRad);
@@ -35,6 +36,7 @@ function distanceMetersApprox(a: [number, number], b: [number, number]) {
   return dx + dy;
 }
 
+// mesure edges distance in meters to use as weights for routing
 function lineLength(coords: [number, number][]) {
   if (!Array.isArray(coords) || coords.length < 2) return 0;
   let total = 0;
@@ -46,7 +48,7 @@ export function buildGraph(nodesGeojson: any, edgesGeojson: any) {
   const nodesById = new Map<string, NodeRec>();
   const adjacency = new Map<string, { to: string; weight: number; edge: EdgeRec }[]>();
 
-  // init adjacency lists
+  // Create graph nodes and build adjacency entries per node
   for (const f of nodesGeojson.features || []) {
     const p = f.properties || {};
     const id = p.id;
@@ -60,18 +62,18 @@ export function buildGraph(nodesGeojson: any, edgesGeojson: any) {
       coords: f.geometry.coordinates,
       properties: p,
     };
-
     nodesById.set(id, node);
     adjacency.set(id, [] as any);
   }
 
+  // Each edge is encoded as an undirected connection
   for (const f of edgesGeojson.features || []) {
     const p = f.properties || {};
     const from = p.from;
     const to = p.to;
     if (!from || !to) continue;
     if (!nodesById.has(from) || !nodesById.has(to)) continue;
-
+    // If no edge, fallback to straight segment
     const coords: [number, number][] =
       f.geometry?.coordinates || [nodesById.get(from)!.coords, nodesById.get(to)!.coords];
 
@@ -85,10 +87,9 @@ export function buildGraph(nodesGeojson: any, edgesGeojson: any) {
       coords,
       properties: p,
     };
-
+    // Routing can move both directions along corridor, stairs or elevators
     (adjacency.get(from) as any).push({ to, weight: edge.weight, edge });
     (adjacency.get(to) as any).push({ to: from, weight: edge.weight, edge });
   }
-
   return { nodesById, adjacency };
 }
