@@ -13,9 +13,8 @@ import {
   type CameraRef,
 } from "@maplibre/maplibre-react-native";
 
-const EMPTY_FC = { type: "FeatureCollection", features: [] };
-
-const MAP_STYLE = {
+const EMPTY_FC: any = { type: "FeatureCollection", features: [] };
+const MAP_STYLE = JSON.stringify({
   version: 8,
   sources: {},
   layers: [
@@ -25,16 +24,16 @@ const MAP_STYLE = {
       paint: { "background-color": "#f6f6f6" },
     },
   ],
-};
+});
 
 function getBoundsFromGeoJSON(data: any) {
   if (!data) return null;
-
   let minLng = Infinity;
   let minLat = Infinity;
   let maxLng = -Infinity;
   let maxLat = -Infinity;
 
+  // Loop to find the bounds of the geojson data
   const visitCoords = (coords: any) => {
     if (!Array.isArray(coords)) return;
 
@@ -81,35 +80,7 @@ function getBoundsFromGeoJSON(data: any) {
   };
 }
 
-function getCenterFromVisibleBounds(
-  visibleBounds: [[number, number], [number, number]] | undefined
-): [number, number] | null {
-  if (!Array.isArray(visibleBounds) || visibleBounds.length < 2) return null;
-
-  const [first, second] = visibleBounds;
-  if (
-    !Array.isArray(first) ||
-    !Array.isArray(second) ||
-    first.length < 2 ||
-    second.length < 2
-  ) {
-    return null;
-  }
-
-  const [lngA, latA] = first;
-  const [lngB, latB] = second;
-  if (
-    typeof lngA !== "number" ||
-    typeof latA !== "number" ||
-    typeof lngB !== "number" ||
-    typeof latB !== "number"
-  ) {
-    return null;
-  }
-
-  return [(lngA + lngB) / 2, (latA + latB) / 2];
-}
-
+// return the features that correspond to the given floor
 function filterFeatureCollectionByFloor(
   data: any,
   floor: number | null,
@@ -128,6 +99,7 @@ function filterFeatureCollectionByFloor(
   };
 }
 
+// filter to be able to only show the destination if the user is on the correct floor
 function filterDestinationByFloor(feature: any, floor: number | null) {
   if (!feature) return null;
   if (floor === null || floor === undefined) return feature;
@@ -181,6 +153,7 @@ export default function IndoorMap({
   const latestRecenterTargetCoordRef = useRef<[number, number] | null>(null);
   const latestMapHeadingRef = useRef<number>(0);
   const lastHandledRecenterTickRef = useRef<number>(-1);
+  // These constants are so the map does not immediately snap back while the user is panning or zooming.
   const followPausedByUserRef = useRef(false);
   const manualOverrideRef = useRef(false);
   const lastManualInteractionAtRef = useRef(0);
@@ -209,6 +182,7 @@ export default function IndoorMap({
     }
   };
 
+  // track the user intended view and set the camera to that
   const freezeCameraToViewport = (event: any) => {
     if (!cameraRef.current) return;
     if (manualFreezeInProgressRef.current) return;
@@ -217,11 +191,27 @@ export default function IndoorMap({
       event?.properties?.zoom ??
       event?.properties?.zoomLevel ??
       currentZoomRef.current;
-    const heading =
-      event?.properties?.heading ?? currentCameraHeadingRef.current ?? 0;
-    const center =
-      currentCenterRef.current ??
-      getCenterFromVisibleBounds(event?.properties?.visibleBounds);
+    const heading = event?.properties?.heading ?? currentCameraHeadingRef.current ?? 0;
+    const visibleBounds = event?.properties?.visibleBounds;
+    let boundsCenter: [number, number] | null = null;
+
+    if (Array.isArray(visibleBounds) && visibleBounds.length >= 2) {
+      const [first, second] = visibleBounds;
+      if (
+        Array.isArray(first) &&
+        Array.isArray(second) &&
+        first.length >= 2 &&
+        second.length >= 2 &&
+        typeof first[0] === "number" &&
+        typeof first[1] === "number" &&
+        typeof second[0] === "number" &&
+        typeof second[1] === "number"
+      ) {
+        boundsCenter = [(first[0] + second[0]) / 2, (first[1] + second[1]) / 2];
+      }
+    }
+
+    const center = currentCenterRef.current ?? boundsCenter;
 
     if (
       !center ||
@@ -250,27 +240,32 @@ export default function IndoorMap({
   };
 
   useEffect(() => {
+    // Keep the latest live position
     latestUserCoordRef.current = userCoord;
   }, [userCoord]);
 
   useEffect(() => {
+    // Keep requested recenter target available for the next recenter event.
     latestRecenterTargetCoordRef.current = recenterTargetCoord;
   }, [recenterTargetCoord]);
 
   useEffect(() => {
+    // Recenter should preserve the latest heading that the screen asked the map to use.
     latestMapHeadingRef.current = mapHeading;
   }, [mapHeading]);
 
+  // Show only the floorplan for the floor the user is currently viewing.
   const filteredFloorplan = useMemo(
     () => filterFeatureCollectionByFloor(floorplan || EMPTY_FC, currentFloor, false),
     [currentFloor, floorplan]
   );
 
+  // Filter decision nodes by floor
   const filteredRouteNodes = useMemo(
     () => filterFeatureCollectionByFloor(routeNodes || EMPTY_FC, currentFloor, false),
     [currentFloor, routeNodes]
   );
-
+  // Filter nodes by floor
   const filteredNodes = useMemo(
     () => filterFeatureCollectionByFloor(nodes || EMPTY_FC, currentFloor, false),
     [currentFloor, nodes]
@@ -283,12 +278,16 @@ export default function IndoorMap({
   }, [filteredNodes, filteredRouteNodes]);
 
   const visibleDestinationFeature = useMemo(() => {
+    // Before navigation starts we can keep showing the destination freely; once
+    // navigation starts, only show it on the matching floor.
     if (!destinationFeature) return null;
     if (!isStarted) return destinationFeature;
     return filterDestinationByFloor(destinationFeature, currentFloor);
   }, [currentFloor, destinationFeature, isStarted]);
 
   const initialCenter = useMemo<[number, number]>(() => {
+    // Start the map near the main entrance when possible, otherwise fall back to the
+    // first known node or a hardcoded hospital center.
     const entrance =
       filteredNodes?.features?.find((f: any) => f.properties?.role === "doors") ||
       filteredNodes?.features?.[0] ||
@@ -304,6 +303,7 @@ export default function IndoorMap({
     heading: 0,
   });
 
+  // Keep the camera element stable so MapLibre does not recreate it on every render.
   const cameraElement = useMemo(
     () => (
       <Camera
@@ -317,29 +317,13 @@ export default function IndoorMap({
   );
 
   const activeBounds = useMemo(() => {
+    // Prefer to fit the route first
     const routeBounds = getBoundsFromGeoJSON(route);
     return routeBounds || getBoundsFromGeoJSON(filteredFloorplan) || getBoundsFromGeoJSON(iconNodes);
   }, [filteredFloorplan, iconNodes, route]);
 
-  const userPoint = useMemo<any>(() => {
-    if (!userCoord) return EMPTY_FC;
-
-    return {
-      type: "FeatureCollection",
-      features: [
-        {
-          type: "Feature",
-          properties: {},
-          geometry: {
-            type: "Point",
-            coordinates: userCoord,
-          },
-        },
-      ],
-    };
-  }, [userCoord]);
-
-  const goalPoint = useMemo(() => {
+  const goalPoint = useMemo<any>(() => {
+    // Wrap the destination into a point feature for rendering
     if (!visibleDestinationFeature?.geometry?.coordinates) return EMPTY_FC;
 
     return {
@@ -361,7 +345,9 @@ export default function IndoorMap({
   }, [visibleDestinationFeature]);
 
   useEffect(() => {
+    // When navigation has not started yet, auto-fit to the map bounds
     if (!allowAutoCamera || !mapLoaded || !cameraRef.current || isStarted || !activeBounds) return;
+    // if the user has manually interacted, do not auto-fit
     if (manualOverrideRef.current) return;
     if (followPausedByUserRef.current) return;
     if (Date.now() < recenteredUntilRef.current) return;
@@ -384,6 +370,8 @@ export default function IndoorMap({
   }, [activeBounds, allowAutoCamera, isStarted, mapLoaded]);
 
   useEffect(() => {
+    // Handle explicit recenter requests from the parent screen, but do not override
+    // a manual interaction that happened after that request was made.
     if (recenterTick <= 0) return;
     if (recenterTick <= lastHandledRecenterTickRef.current) return;
 
@@ -395,10 +383,7 @@ export default function IndoorMap({
     const targetCoord = latestRecenterTargetCoordRef.current ?? latestUserCoord;
     if (!targetCoord) return;
 
-    // Consume tick only once we can actually apply the target view.
     lastHandledRecenterTickRef.current = recenterTick;
-
-    // Re-enable guided follow only when user explicitly requests recenter/target.
     followPausedByUserRef.current = false;
     manualOverrideRef.current = false;
 
@@ -413,12 +398,26 @@ export default function IndoorMap({
     });
   }, [allowRecenterCamera, mapLoaded, recenterRequestedAt, recenterTick]);
 
-  // Intentionally no continuous auto-follow camera effect.
-  // Camera recenter/orientation is only applied on explicit recenterTick requests
-  // (target button / start action), so manual map control stays stable.
-
   return (
-    <View style={styles.wrap}>
+    <View
+      style={styles.wrap}
+      onTouchStart={() => {
+        // Touching the map means the user is taking control, so pause follow mode.
+        isTouchingMapRef.current = true;
+        markManualInteraction();
+      }}
+      onTouchMove={() => {
+        // Keep marking movement as manual interaction while the user drags the map.
+        isTouchingMapRef.current = true;
+        markManualInteraction();
+      }}
+      onTouchEnd={() => {
+        isTouchingMapRef.current = false;
+      }}
+      onTouchCancel={() => {
+        isTouchingMapRef.current = false;
+      }}
+    >
       <MapView
         style={styles.map}
         mapStyle={MAP_STYLE}
@@ -426,28 +425,17 @@ export default function IndoorMap({
         pitchEnabled={false}
         compassEnabled={false}
         zoomEnabled
-        onTouchStart={() => {
-          isTouchingMapRef.current = true;
-          markManualInteraction();
-        }}
-        onTouchMove={() => {
-          isTouchingMapRef.current = true;
-          markManualInteraction();
-        }}
-        onTouchEnd={() => {
-          isTouchingMapRef.current = false;
-        }}
-        onTouchCancel={() => {
-          isTouchingMapRef.current = false;
-        }}
         onRegionWillChange={(event: any) => {
           const isUserInteraction = event?.properties?.isUserInteraction;
           if (isTouchingMapRef.current || isUserInteraction === true) {
+            // Freeze the camera to the user's current viewport so automatic follow
+            // logic does not immediately snap the map somewhere else.
             markManualInteraction();
             freezeCameraToViewport(event);
             return;
           }
 
+          // Ignore the move if it came from our own setCamera call.
           const isProgrammatic = Date.now() < programmaticCameraUntilRef.current;
           if (isProgrammatic) return;
 
@@ -455,7 +443,7 @@ export default function IndoorMap({
             markManualInteraction();
           }
         }}
-        onCameraChanged={(event: any) => {
+        onRegionDidChange={(event: any) => {
           const zoom = event?.properties?.zoom ?? event?.properties?.zoomLevel;
           if (typeof zoom === "number" && Number.isFinite(zoom)) {
             currentZoomRef.current = zoom;
@@ -479,15 +467,18 @@ export default function IndoorMap({
             currentCameraHeadingRef.current = heading;
           }
         }}
+        // Wait until the map is ready before trying to fit bounds or recenter it.
         onDidFinishLoadingMap={() => setMapLoaded(true)}
       >
         {cameraEnabled ? cameraElement : null}
 
+        {/* Main floor polygon for the visible floor. */}
         <ShapeSource id="floorplan" shape={filteredFloorplan || EMPTY_FC}>
           <FillLayer id="floor-fill" style={{ fillColor: "#b9dfe8", fillOpacity: 1.0 }} />
           <LineLayer id="floor-outline" style={{ lineColor: "#0f1e21", lineWidth: 2 }} />
         </ShapeSource>
 
+        {/* Primary route shown on the current map view. */}
         <ShapeSource id="route" shape={route || EMPTY_FC}>
           <LineLayer
             id="route-layer"
@@ -499,6 +490,7 @@ export default function IndoorMap({
           />
         </ShapeSource>
 
+        {/* Secondary route preview, usually future-floor path. */}
         <ShapeSource id="route-secondary" shape={secondaryRoute || EMPTY_FC}>
           <LineLayer
             id="route-secondary-layer"
@@ -510,6 +502,7 @@ export default function IndoorMap({
           />
         </ShapeSource>
 
+        {/* Decision points or route nodes highlighted along the route. */}
         <ShapeSource id="route-node-points" shape={filteredRouteNodes || EMPTY_FC}>
           <CircleLayer
             id="route-node-points-layer"
@@ -522,6 +515,7 @@ export default function IndoorMap({
           />
         </ShapeSource>
 
+        {/* Custom map icons used by the node layers below. */}
         <Images
           images={{
             "door-icon": require("../../assets/icons/door.png"),
@@ -532,6 +526,7 @@ export default function IndoorMap({
           }}
         />
 
+        {/* Visible door, stairs, and elevator icons for the active floor. */}
         <ShapeSource id="nodes" shape={iconNodes || EMPTY_FC}>
           <SymbolLayer
             id="door-layer"
@@ -587,6 +582,7 @@ export default function IndoorMap({
           />
         </ShapeSource>
 
+        {/* Destination marker and optional label bubble. */}
         <ShapeSource id="goal-point" shape={goalPoint} onPress={() => setShowGoalLabel((value) => !value)}>
           <SymbolLayer
             id="goal-marker-layer"
@@ -613,8 +609,9 @@ export default function IndoorMap({
         </ShapeSource>
 
         {userCoord ? (
+          // Live user marker with optional heading arrow.
           <MarkerView coordinate={userCoord} anchor={{ x: 0.5, y: 0.5 }} allowOverlap>
-            <View style={styles.userMarkerWrap}>
+            <View style={styles.userMarkerWrap} pointerEvents="none">
               {typeof userHeading === "number" && Number.isFinite(userHeading) ? (
                 <View
                   style={[
@@ -644,7 +641,6 @@ const styles = StyleSheet.create({
     height: 56,
     alignItems: "center",
     justifyContent: "center",
-    pointerEvents: "none",
   },
   headingArrowSlot: {
     position: "absolute",
@@ -652,7 +648,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     alignItems: "center",
-    justifyContent: "flex-right",
+    justifyContent: "flex-end",
     overflow: "hidden",
   },
   headingArrowShadow: {
@@ -661,10 +657,10 @@ const styles = StyleSheet.create({
     height: 0,
     borderLeftWidth: 0,
     borderRightWidth: 0,
-    borderBottomWidth: 0,
+    borderTopWidth: 0,
     borderLeftColor: "transparent",
     borderRightColor: "transparent",
-    borderBottomColor: "#6291e2",
+    borderTopColor: "#6291e2",
   },
   headingArrow: {
     position: "absolute",
@@ -672,10 +668,10 @@ const styles = StyleSheet.create({
     height: 0,
     borderLeftWidth: 5,
     borderRightWidth: 5,
-    borderBottomWidth: 10,
+    borderTopWidth: 10,
     borderLeftColor: "transparent",
     borderRightColor: "transparent",
-    borderBottomColor: "#0B57D0",
+    borderTopColor: "#0B57D0",
   },
   userDotShadow: {
     position: "absolute",

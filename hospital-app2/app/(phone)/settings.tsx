@@ -3,28 +3,46 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { useNavStore } from "../../store/navStore";
 import { useAppAppearance } from "../../constants/theme";
-import { NAV_DATA_UPDATED_AT, NAV_DATA_VERSION, TELEMETRY_RETENTION_DAYS } from "../../lib/appMetadata";
 
-const TEXT_SIZE_OPTIONS = [
-  { id: "small", label: "Pequeño" },
-  { id: "medium", label: "Mediano" },
-  { id: "large", label: "Grande" },
-] as const;
+const textSizeOptions = [{ id: "small", label: "Pequeño" }, { id: "medium", label: "Mediano" }, { id: "large", label: "Grande" },] as const;
+
+function getMapUpdatedLabel(updatedAt: string | null) {
+  if (!updatedAt) return "No disponible";
+
+  const date = new Date(updatedAt);
+  if (Number.isNaN(date.getTime())) 
+    return updatedAt;
+
+  const label = new Intl.DateTimeFormat("es-ES", {
+    month: "long",
+    year: "numeric",
+  }).format(date);
+
+  return label.replace(" de ", " ").replace(/^./, (char) => char.toUpperCase());
+}
+
+function getMapSourceLabel(source: string | null) {
+  if (source === "backend") return "Backend";
+  if (source === "local-fallback") return "Copia local";
+  return "No disponible";
+}
 
 export default function Settings() {
-  const prefer = useNavStore((s) => s.navigationUi.prefer);
-  const soundEnabled = useNavStore((s) => s.navigationUi.soundEnabled);
-  const textSize = useNavStore((s) => s.navigationUi.textSize);
-  const highContrastEnabled = useNavStore((s) => s.navigationUi.highContrastEnabled);
-  const setNavigationPreference = useNavStore((s) => s.setNavigationPreference);
-  const setSoundEnabled = useNavStore((s) => s.setSoundEnabled);
-  const setTextSize = useNavStore((s) => s.setTextSize);
-  const setHighContrastEnabled = useNavStore((s) => s.setHighContrastEnabled);
+  // Use values from navigation store
+  const mapVersion = useNavStore((state) => state.navData.version) || "Marzo 2026, version 1";
+  const mapUpdated = useNavStore((state) => state.navData.updatedAt);
+  const mapSource = useNavStore((state) => state.navData.source);
+  const routePreference = useNavStore((state) => state.navigationUi.prefer);
+  const isSoundEnabled = useNavStore((state) => state.navigationUi.soundEnabled);
+  const selectedTextSize = useNavStore((state) => state.navigationUi.textSize);
+  const isHighContrastEnabled = useNavStore((state) => state.navigationUi.highContrastEnabled);
+  const setRoutePreference = useNavStore((state) => state.setNavigationPreference);
+  const setSoundEnabled = useNavStore((state) => state.setSoundEnabled);
+  const setTextSize = useNavStore((state) => state.setTextSize);
+  const setHighContrastEnabled = useNavStore((state) => state.setHighContrastEnabled);
   const { palette, scaleFont, scaleLineHeight } = useAppAppearance();
-  const formattedMapTimestamp = new Date(NAV_DATA_UPDATED_AT).toLocaleString("es-ES", {
-    hour12: false,
-  });
-
+  const mapUpdatedLabel = getMapUpdatedLabel(mapUpdated);
+  const mapSourceLabel = getMapSourceLabel(mapSource);
   return (
     <ScrollView
       style={[styles.page, { backgroundColor: palette.background }]}
@@ -32,99 +50,73 @@ export default function Settings() {
       showsVerticalScrollIndicator={false}
     >
       <Text
-        style={[
-          styles.title,
-          {
-            color: palette.textSectionTitles,
-            fontSize: scaleFont(22),
-            lineHeight: scaleLineHeight(28),
-          },
-        ]}
+        style={[styles.title, { color: palette.textSectionTitles,fontSize: scaleFont(22), lineHeight: scaleLineHeight(28),}, ]}
       >
         Ajustes
       </Text>
 
+      {/* Choose accessibility options */}
       <View style={[styles.card, { backgroundColor: palette.surfaceAlt }]}>
         <Text style={[styles.cardTitle, { color: palette.textPrimary, fontSize: scaleFont(18) }]}>
           Preferencia de ruta
         </Text>
         <Text
-          style={[
-            styles.cardText,
-            {
-              color: palette.textPrimary,
-              fontSize: scaleFont(14),
-              lineHeight: scaleLineHeight(20),
-            },
-          ]}
+          style={[styles.cardText, {color: palette.textPrimary,fontSize: scaleFont(14),lineHeight: scaleLineHeight(20),}]}
         >
           Elija el modo de acceso vertical predeterminado cuando la ruta incluya escaleras o ascensores.
         </Text>
         <View style={styles.row}>
-          <SettingChip
+          <SimpleOption
             label="Stairs"
-            selected={prefer === "stairs"}
+            selected={routePreference === "stairs"}
             palette={palette}
             fontSize={scaleFont(15)}
-            onPress={() => setNavigationPreference("stairs")}
+            onPress={() => setRoutePreference("stairs")}
           />
-          <SettingChip
+          <SimpleOption
             label="Elevator"
-            selected={prefer === "elevator"}
+            selected={routePreference === "elevator"}
             palette={palette}
             fontSize={scaleFont(15)}
-            onPress={() => setNavigationPreference("elevator")}
+            onPress={() => setRoutePreference("elevator")}
           />
         </View>
       </View>
 
+      {/* Sound option */}
       <View style={[styles.card, { backgroundColor: palette.surfaceAlt }]}>
         <Text style={[styles.cardTitle, { color: palette.textPrimary, fontSize: scaleFont(18) }]}>
           Leer instrucciones
         </Text>
         <Text
-          style={[
-            styles.cardText,
-            {
-              color: palette.textPrimary,
-              fontSize: scaleFont(14),
-              lineHeight: scaleLineHeight(20),
-            },
-          ]}
+          style={[styles.cardText,{color: palette.textPrimary, fontSize: scaleFont(14), lineHeight: scaleLineHeight(20),},]}
         >
-          Las pistas de audio pueden activarse durante la navegacion, pero aqui se define el valor predeterminado.
+          Puede activarse durante la navegacion, pero aqui se define el valor predeterminado.
         </Text>
-        <SettingChip
-          label={soundEnabled ? "Sound on" : "Sound off"}
-          selected={soundEnabled}
+        <SimpleOption
+          label={isSoundEnabled ? "Sound on" : "Sound off"}
+          selected={isSoundEnabled}
           palette={palette}
           fontSize={scaleFont(15)}
-          onPress={() => setSoundEnabled(!soundEnabled)}
+          onPress={() => setSoundEnabled(!isSoundEnabled)}
         />
       </View>
 
+      {/* Multiple text size options */}
       <View style={[styles.card, { backgroundColor: palette.surfaceAlt }]}>
         <Text style={[styles.cardTitle, { color: palette.textPrimary, fontSize: scaleFont(18) }]}>
           Tamano del texto
         </Text>
-        <Text
-          style={[
-            styles.cardText,
-            {
-              color: palette.textPrimary,
-              fontSize: scaleFont(14),
-              lineHeight: scaleLineHeight(20),
-            },
-          ]}
+        <Text style={[styles.cardText,{color: palette.textPrimary,fontSize: scaleFont(14),lineHeight: scaleLineHeight(20),},]}
         >
-          Ajuste el tamano general del texto para que la interfaz sea mas comoda de leer.
+          Ajuste el tamano general del texto para que pueda leer mas facilmente
         </Text>
         <View style={styles.rowWrap}>
-          {TEXT_SIZE_OPTIONS.map((option) => (
-            <SettingChip
+          {textSizeOptions.map((option) => (
+            <SimpleOption
               key={option.id}
               label={option.label}
-              selected={textSize === option.id}
+              selected={selectedTextSize === option.id}
               palette={palette}
               fontSize={scaleFont(15)}
               onPress={() => setTextSize(option.id)}
@@ -133,109 +125,70 @@ export default function Settings() {
         </View>
       </View>
 
+      {/* Contrast option */}
       <View style={[styles.card, { backgroundColor: palette.surfaceAlt }]}>
         <Text style={[styles.cardTitle, { color: palette.textPrimary, fontSize: scaleFont(18) }]}>
           Modo de alto contraste
         </Text>
         <Text
-          style={[
-            styles.cardText,
-            {
-              color: palette.textPrimary,
-              fontSize: scaleFont(14),
-              lineHeight: scaleLineHeight(20),
-            },
-          ]}
+          style={[styles.cardText,{color: palette.textPrimary, fontSize: scaleFont(14), lineHeight: scaleLineHeight(20),},]}
         >
           Aumente el contraste entre texto, bordes y superficies para mejorar la legibilidad.
         </Text>
-        <SettingChip
-          label={highContrastEnabled ? "Activado" : "Desactivado"}
-          selected={highContrastEnabled}
+        <SimpleOption
+          label={isHighContrastEnabled ? "Activado" : "Desactivado"}
+          selected={isHighContrastEnabled}
           palette={palette}
           fontSize={scaleFont(15)}
-          onPress={() => setHighContrastEnabled(!highContrastEnabled)}
+          onPress={() => setHighContrastEnabled(!isHighContrastEnabled)}
         />
       </View>
 
-      <View style={[styles.card, { backgroundColor: palette.surfaceAlt }]}>
-        <Text style={[styles.cardTitle, { color: palette.textPrimary, fontSize: scaleFont(18) }]}>
-          Mapa y version
-        </Text>
-        <Text
-          style={[
-            styles.cardText,
-            {
-              color: palette.textPrimary,
-              fontSize: scaleFont(14),
-              lineHeight: scaleLineHeight(20),
-            },
-          ]}
-        >
-          Version del mapa: {NAV_DATA_VERSION}
-        </Text>
-        <Text
-          style={[
-            styles.cardText,
-            {
-              color: palette.textPrimary,
-              fontSize: scaleFont(14),
-              lineHeight: scaleLineHeight(20),
-            },
-          ]}
-        >
-          Ultima actualizacion: {formattedMapTimestamp}
-        </Text>
-      </View>
-
+      {/* Feedback entry */}
       <View style={[styles.card, { backgroundColor: palette.surfaceAlt }]}>
         <Text style={[styles.cardTitle, { color: palette.textPrimary, fontSize: scaleFont(18) }]}>
           Feedback y sugerencias
         </Text>
         <Text
-          style={[
-            styles.cardText,
-            {
-              color: palette.textPrimary,
-              fontSize: scaleFont(14),
-              lineHeight: scaleLineHeight(20),
-            },
-          ]}
+          style={[styles.cardText,{color: palette.textPrimary, fontSize: scaleFont(14), lineHeight: scaleLineHeight(20),},]}
         >
           Ayudanos a mejorar reportando problemas o enviando sugerencias.
         </Text>
-        <SettingChip
+        <SimpleOption
           label="Enviar feedback"
           selected={false}
           palette={palette}
           fontSize={scaleFont(15)}
           onPress={() => router.push("/feedback")}
         />
-        <Text
-          style={[
-            styles.cardText,
-            {
-              color: palette.textPrimary,
-              fontSize: scaleFont(13),
-              lineHeight: scaleLineHeight(18),
-            },
-          ]}
-        >
-          Los eventos anonimos se guardan localmente hasta {TELEMETRY_RETENTION_DAYS} dias.
+      </View>
+
+      {/* Versioning information */}
+      <View style={[styles.card, { backgroundColor: palette.surfaceAlt }]}>
+        <Text style={[styles.cardTitle, { color: palette.textPrimary, fontSize: scaleFont(18) }]}>
+          Mapa y version
         </Text>
-        <SettingChip
-          label="Ver telemetria"
-          selected={false}
-          palette={palette}
-          fontSize={scaleFont(15)}
-          onPress={() => router.push("/telemetry")}
-        />
+        <Text
+          style={[styles.cardText, {color: palette.textPrimary, fontSize: scaleFont(14), lineHeight: scaleLineHeight(20),},]}
+        >
+          Version del mapa: {mapVersion}
+        </Text>
+        <Text
+          style={[styles.cardText,{color: palette.textPrimary, fontSize: scaleFont(14), lineHeight: scaleLineHeight(20),},]}
+        >
+          Ultima actualizacion: {mapUpdatedLabel}
+        </Text>
+        <Text
+          style={[styles.cardText, {color: palette.textPrimary, fontSize: scaleFont(14), lineHeight: scaleLineHeight(20),},]}
+        >
+          Fuente de datos: {mapSourceLabel}
+        </Text>
       </View>
     </ScrollView>
   );
 }
 
-function SettingChip({
+function SimpleOption({
   label,
   selected,
   palette,
@@ -254,6 +207,7 @@ function SettingChip({
   onPress: () => void;
 }) {
   return (
+    // Reusing toggle button
     <Pressable
       style={[
         styles.option,
