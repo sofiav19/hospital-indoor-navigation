@@ -45,7 +45,7 @@ const STEP_PROGRESS_WITH_RADIUS_MIN = 0.97;
 const TURN_PROMPT_PROGRESS_MIN = 0.62;
 const TURN_PROMPT_DISTANCE_METERS = 1.4;
 const STEP_PROGRESS_RADIUS_METERS = 0.85;
-const SEGMENT_TUBE_RADIUS_METERS = 0.9;
+const SEGMENT_TUBE_RADIUS_METERS = 1.1;
 const OFF_ROUTE_RADIUS_METERS = 2.1;
 const ARRIVAL_COMPLETE_RADIUS_METERS = 1.0;
 const TRANSITION_ZONE_RADIUS_METERS = 2.0;
@@ -316,7 +316,7 @@ const [recenterRequestedAt, setRecenterRequestedAt] = useState(0);
   const hasShownLocationPrivacyNoteRef = useRef(false);
 
   const effectiveStartNodeId = postNavStartOverrideId || start.nodeId || "n_hospital_entrance_f0";
-  const followsCurrentLocation = start.source !== "manual-node";
+  const followsCurrentLocation = postNavStartOverrideId !== null || start.source !== "manual-node";
 
   useEffect(() => {
     setMapViewMode("navigate");
@@ -378,13 +378,27 @@ const [recenterRequestedAt, setRecenterRequestedAt] = useState(0);
     if (!isStarted || !destinationFeature || !userCoord) return false;
 
     const destinationCoords = destinationFeature?.geometry?.coordinates;
+    const destinationFloor = destinationFeature?.properties?.floor ?? null;
+    const userFloor =
+      livePosition.floor ??
+      navigationFloor ??
+      startFeature?.properties?.floor ??
+      null;
     if (!Array.isArray(destinationCoords)) return false;
+
+    if (
+      destinationFloor !== null &&
+      userFloor !== null &&
+      destinationFloor !== userFloor
+    ) {
+      return confirmedNodeId === destinationId;
+    }
 
     return (
       confirmedNodeId === destinationId ||
       distanceMeters(userCoord, destinationCoords as [number, number]) <= ARRIVAL_COMPLETE_RADIUS_METERS
     );
-  }, [confirmedNodeId, destinationFeature, destinationId, isStarted, userCoord]);
+  }, [confirmedNodeId, destinationFeature, destinationId, isStarted, livePosition.floor, navigationFloor, startFeature, userCoord,]);
 
   const destinationDirectoryEntry = useMemo(
     () => HOSPITAL_DIRECTORY.find((entry) => entry.destinationNodeId === destinationId) || null,
@@ -837,6 +851,12 @@ const [recenterRequestedAt, setRecenterRequestedAt] = useState(0);
       return clampedActiveIndex;
     }
 
+    // If the active step is already on another floor, keep showing the most recent
+    // visible instruction on the current floor before jumping ahead to a future one.
+    for (let i = clampedActiveIndex - 1; i >= 0; i--) {
+      if (segmentTouchesFloor(segments[i], currentFloor)) return i;
+    }
+
     for (let i = clampedActiveIndex; i < segments.length; i++) {
       if (segmentTouchesFloor(segments[i], currentFloor)) return i;
     }
@@ -1156,10 +1176,16 @@ const [recenterRequestedAt, setRecenterRequestedAt] = useState(0);
       (item: { segment: any; index: number }) => item.index < activeStepIndex
     );
 
-    const primarySegment = remainingVisibleSegments[0]?.segment || null;
+    const primarySegment =
+      remainingVisibleSegments[0]?.segment ||
+      completedVisibleSegments[completedVisibleSegments.length - 1]?.segment ||
+      null;
 
     const primaryFeatures = primarySegment?.geojson?.features || [];
     const secondaryRemainingSegments = remainingVisibleSegments.filter(
+      (item: { segment: any; index: number }) => item.segment !== primarySegment
+    );
+    const secondaryCompletedSegments = completedVisibleSegments.filter(
       (item: { segment: any; index: number }) => item.segment !== primarySegment
     );
     const collectFeatures = (items: { segment: any; index: number }[]) =>
@@ -1168,7 +1194,7 @@ const [recenterRequestedAt, setRecenterRequestedAt] = useState(0);
       }, [] as any[]);
 
     const secondaryFeatures = [
-      ...collectFeatures(completedVisibleSegments),
+      ...collectFeatures(secondaryCompletedSegments),
       ...collectFeatures(secondaryRemainingSegments),
     ];
 
@@ -1560,7 +1586,7 @@ const [recenterRequestedAt, setRecenterRequestedAt] = useState(0);
         ? distanceToPolyline(userCoord, remainingCoords)
         : currentDistance;
 
-    const offRouteDistance = Math.min(currentDistance, remainingDistance);
+    const offRouteDistance = Math.min(currentDistance);
     if (offRouteDistance <= OFF_ROUTE_RADIUS_METERS) return;
 
     const now = Date.now();
@@ -1766,7 +1792,7 @@ const [recenterRequestedAt, setRecenterRequestedAt] = useState(0);
 
   const showInstructionBanner = isStarted && Boolean(nextInstruction);
   const instructionBannerReservedHeight = showInstructionBanner
-    ? Math.max(128, insets.top + 132)
+    ? Math.max(110, insets.top + 114)
     : 0;
 
   return (
@@ -2137,7 +2163,11 @@ const [recenterRequestedAt, setRecenterRequestedAt] = useState(0);
                 return;
               }
               if (postNavStartOverrideId) {
-                setStartNode(postNavStartOverrideId);
+                setStartNode(
+                  postNavStartOverrideId,
+                  "current-location",
+                  livePosition.coords ?? userCoord ?? null
+                );
                 clearPostNavStartOverride();
               }
               setActiveStepIndex(0);
@@ -2435,7 +2465,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   currentLocationFloorButtonText: { fontSize: 14, fontWeight: "800", color: "#FFFFFF", fontFamily: FONT_BODY },
-  mapWrap: { flex: 1, minHeight: 260, overflow: "hidden", position: "relative" },
+  mapWrap: { flex: 1, minHeight: 300, overflow: "hidden", position: "relative" },
   instructionBanner: {
     position: "absolute",
     left: 10,

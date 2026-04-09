@@ -268,8 +268,20 @@ export default function ArNavigation() {
     if (!isStarted || !destinationFeature || !userCoord) return false;
 
     const destinationCoords = destinationFeature?.geometry?.coordinates;
-    return Array.isArray(destinationCoords) && distanceMeters(userCoord, destinationCoords as [number, number]) <= 1.0;
-  }, [destinationFeature, isStarted, userCoord]);
+    const destinationFloor = destinationFeature?.properties?.floor ?? null;
+    const userFloor = livePosition.floor ?? currentFloor ?? null;
+    if (!Array.isArray(destinationCoords)) return false;
+
+    if (
+      destinationFloor !== null &&
+      userFloor !== null &&
+      destinationFloor !== userFloor
+    ) {
+      return false;
+    }
+
+    return distanceMeters(userCoord, destinationCoords as [number, number]) <= 1.0;
+  }, [currentFloor, destinationFeature, isStarted, livePosition.floor, userCoord]);
 
   // Decide which instruction should be shown now
   const displayedInstructionIndex = useMemo(() => {
@@ -282,6 +294,10 @@ export default function ArNavigation() {
 
     if (currentFloor !== null) {
       if (segmentTouchesFloor(activeSegment, currentFloor)) return clampedActiveIndex;
+
+      for (let i = clampedActiveIndex - 1; i >= 0; i--) {
+        if (segmentTouchesFloor(segments[i], currentFloor)) return i;
+      }
 
       for (let i = clampedActiveIndex; i < segments.length; i++) {
         if (segmentTouchesFloor(segments[i], currentFloor)) return i;

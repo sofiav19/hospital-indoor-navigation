@@ -196,14 +196,13 @@ export function buildDetailedInstruction(
   const toFloor = segment?.toFloor ?? fromFloor;
   const transitionRole = getNodeRole(nodes, segment?.fromNodeId) || getNodeRole(nodes, segment?.toNodeId);
   const isCrossFloor = isCrossFloorSegment(segment);
-  const isArrival = Boolean(destinationId && segment?.toNodeId === destinationId);
+  const isArrival = false;
   const metersText = formatMeters(getSegmentMeters(segment));
 
   // Each step gets the current maneuver from the previous instruction
   let maneuver: Maneuver = getTurnFromPreviousSegment(previousSegment, segment);
 
   if (isCrossFloor) {maneuver = (toFloor ?? 0) > (fromFloor ?? 0) ? "up" : "down";}
-  if (isArrival) {maneuver = "arrive";}
 
   let title = getContinueTitle(metersText);
   let detail: string | null = null;
