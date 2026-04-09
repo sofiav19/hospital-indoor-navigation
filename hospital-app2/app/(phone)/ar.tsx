@@ -6,17 +6,30 @@ import * as Speech from "expo-speech";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavStore } from "../../store/navStore";
 import { computeRoute } from "../../lib/route/routeEngine";
-import { buildDetailedInstruction } from "../../lib/route/navigationInstructions";
+import {
+  buildDetailedInstruction,
+  formatInstructionForSpeech,
+  getHeadingFromSegment,
+  getImmediateTurnTitle,
+  getSegmentTurnHint,
+  isCrossFloorSegment,
+  normalizeAngleDelta,
+  segmentTouchesFloor,
+} from "../../lib/route/navigationInstructions";
+import {
+  distanceMeters,
+  getHeadingValue,
+  getNodeRole,
+  smoothHeading,
+} from "../../lib/route/routeHelpers";
 import { AppPalette, useAppAppearance } from "../../constants/theme";
 import { projectGeoJSONForMap } from "../../lib/coords/localToLngLat";
-import { LOCATION_PRIVACY_NOTE } from "../../lib/appMetadata";
+import { trackEvent } from "../../lib/monitoring";
 
 let CameraViewImpl: any = null;
 let useCameraPermissionsImpl: any = null;
 let LocationImpl: any = null;
 
-const CURVE_TURN_MIN_DEGREES = 12;
-const HARD_TURN_MIN_DEGREES = 60;
 const STEP_PROGRESS_MIN = 0.992;
 const TURN_PROMPT_PROGRESS_MIN = 0.62;
 const TURN_PROMPT_DISTANCE_METERS = 1.4;
@@ -37,96 +50,9 @@ try {
 }
 
 function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
-}
+  return Math.max(min, Math.min(max, value));}
 
-function distanceMeters(a: [number, number], b: [number, number]) {
-  const dx = a[0] - b[0];
-  const dy = a[1] - b[1];
-  return Math.sqrt(dx * dx + dy * dy);
-}
-
-function getNodeFeature(nodes: any, nodeId: string | null) {
-  if (!nodeId) return null;
-  return (nodes?.features || []).find((feature: any) => feature?.properties?.id === nodeId) || null;
-}
-
-function getNodeLabel(nodes: any, nodeId: string | null) {
-  return getNodeFeature(nodes, nodeId)?.properties?.label || null;
-}
-
-function getNodeRole(nodes: any, nodeId: string | null) {
-  return getNodeFeature(nodes, nodeId)?.properties?.role || null;
-}
-
-function isCrossFloorSegment(segment: any) {
-  const fromFloor = segment?.floor ?? null;
-  const toFloor = segment?.toFloor ?? null;
-  return fromFloor !== null && toFloor !== null && fromFloor !== toFloor;
-}
-
-function segmentTouchesFloor(segment: any, floor: number | null) {
-  if (!segment || floor === null) return true;
-  return segment?.floor === floor || segment?.toFloor === floor;
-}
-
-function getHeadingFromSegment(coords: [number, number][]) {
-  if (!Array.isArray(coords) || coords.length < 2) return 0;
-
-  const start = coords[0];
-  const end = coords[coords.length - 1];
-  const dx = end[0] - start[0];
-  const dy = end[1] - start[1];
-  if (dx === 0 && dy === 0) return 0;
-
-  const bearing = (Math.atan2(dx, dy) * 180) / Math.PI;
-  return (bearing + 360) % 360;
-}
-
-function normalizeAngleDelta(delta: number) {
-  if (delta > 180) return delta - 360;
-  if (delta < -180) return delta + 360;
-  return delta;
-}
-
-function smoothHeading(previous: number | null, next: number) {
-  if (!Number.isFinite(next)) return previous;
-  if (previous === null || !Number.isFinite(previous)) return next;
-
-  const delta = normalizeAngleDelta(next - previous);
-  const absDelta = Math.abs(delta);
-  if (absDelta < 1) return previous;
-
-  // Same dynamic smoothing as map view to keep both experiences aligned.
-  const gain = absDelta > 45 ? 0.55 : absDelta > 20 ? 0.35 : 0.22;
-  return (previous + delta * gain + 360) % 360;
-}
-
-function getSegmentTurnHint(currentSegment: any, nextSegment: any) {
-  const currentCoords = currentSegment?.geojson?.features?.[0]?.geometry?.coordinates || [];
-  const nextCoords = nextSegment?.geojson?.features?.[0]?.geometry?.coordinates || [];
-
-  if (!Array.isArray(currentCoords) || currentCoords.length < 2) return "forward" as const;
-  if (!Array.isArray(nextCoords) || nextCoords.length < 2) return "forward" as const;
-
-  const currentHeading = getHeadingFromSegment(currentCoords);
-  const nextHeading = getHeadingFromSegment(nextCoords);
-  const delta = normalizeAngleDelta(nextHeading - currentHeading);
-  const absDelta = Math.abs(delta);
-
-  if (absDelta < CURVE_TURN_MIN_DEGREES) return "forward" as const;
-  if (delta < 0) return absDelta >= HARD_TURN_MIN_DEGREES ? ("left" as const) : ("left-forward" as const);
-  return absDelta >= HARD_TURN_MIN_DEGREES ? ("right" as const) : ("right-forward" as const);
-}
-
-function getImmediateTurnTitle(maneuver: string | null | undefined) {
-  if (maneuver === "left") return "Gire a la izquierda";
-  if (maneuver === "right") return "Gire a la derecha";
-  if (maneuver === "left-forward") return "Gire ligeramente a la izquierda";
-  if (maneuver === "right-forward") return "Gire ligeramente a la derecha";
-  return null;
-}
-
+// Get the instruction for turns
 function parseMeters(detail: string | null | undefined) {
   if (!detail) return null;
   const match = detail.match(/(\d+)/);
@@ -156,29 +82,24 @@ function getBannerIconName(hint: string) {
   }
 }
 
-function formatInstructionForSpeech(title: string) {
-  return title.replace(/(\d+)\s?m\b/g, "$1 metros");
-}
-
-const FLOOR_GUIDE_COLORS = ["#55F5FF", "#1739FF"];
-
+// Helper of possible hints
 function isFloorGuideHint(hint: string) {
   return ["forward", "left", "right", "left-forward", "right-forward"].includes(hint);
 }
 
+// arrows will only show left and right directions not soft turns
 function getFloorGuideVariant(hint: string) {
   if (hint === "left" || hint === "left-forward") return "left" as const;
   if (hint === "right" || hint === "right-forward") return "right" as const;
   return "forward" as const;
 }
 
+// Animate turns by shifting arrows
 function getFloorGuideShift(variant: ReturnType<typeof getFloorGuideVariant>, progress: number) {
   const depth = 1 - progress;
   if (depth <= 0.58) return 0;
-
   const normalized = Math.min(1, (depth - 0.58) / 0.42);
   const amount = Math.pow(normalized, 1.2) * 48;
-
   if (variant === "left") return -amount;
   if (variant === "right") return amount;
   return 0;
@@ -201,6 +122,7 @@ export default function ArNavigation() {
   const lastSpokenInstructionKeyRef = React.useRef<string | null>(null);
   const hasShownLocationPrivacyNoteRef = React.useRef(false);
 
+  // Main data taken from the navigation store
   const navData = useNavStore((s) => s.navData);
   const start = useNavStore((s) => s.start);
   const destinationId = useNavStore((s) => s.destinationId);
@@ -210,13 +132,13 @@ export default function ArNavigation() {
   const currentFloor = useNavStore((s) => s.navigationUi.navigationFloor);
   const prefer = useNavStore((s) => s.navigationUi.prefer);
   const soundEnabled = useNavStore((s) => s.navigationUi.soundEnabled);
+  const routeStartedAtMs = useNavStore((s) => s.navigationUi.routeStartedAtMs);
   const setNavigationPreference = useNavStore((s) => s.setNavigationPreference);
   const setMapViewMode = useNavStore((s) => s.setMapViewMode);
   const setRoute = useNavStore((s) => s.setRoute);
   const setSoundEnabled = useNavStore((s) => s.setSoundEnabled);
   const livePosition = useNavStore((s) => s.livePosition);
-
-  // Optional future OptiTrack/local-frame heading from store.
+  // Prefer tracked heading if it exists
   const optitrackHeading =
     (livePosition as any)?.heading ??
     (livePosition as any)?.yawDegrees ??
@@ -227,25 +149,26 @@ export default function ArNavigation() {
     setMapViewMode("ar");
   }, [setMapViewMode]);
 
+  // Ask for camera access when entering AR
   useEffect(() => {
     if (!cameraPermission || cameraPermission.granted) return;
     requestCameraPermission();
   }, [cameraPermission, requestCameraPermission]);
 
+  // Start heading updates and restart them when the app comes back
   useEffect(() => {
     let subscription: any = null;
     let isMounted = true;
 
     function stopHeadingWatch() {
       if (subscription?.remove) {
-        subscription.remove();
-      }
+        subscription.remove();}
       subscription = null;
     }
 
+    // Start async function to watch for heading
     async function startHeadingWatch() {
       if (!LocationImpl) return;
-
       stopHeadingWatch();
       setHeadingWatchError(false);
 
@@ -260,7 +183,7 @@ export default function ArNavigation() {
           } else {
             hasShownLocationPrivacyNoteRef.current = true;
             granted = await new Promise<boolean>((resolve) => {
-              Alert.alert("Nota de privacidad", LOCATION_PRIVACY_NOTE, [
+              Alert.alert("Nota de privacidad", "La localizacion se usa solo para mostrar tu posicion y recomendar la mejor entrada.", [
                 { text: "Ahora no", style: "cancel", onPress: () => resolve(false) },
                 {
                   text: "Continuar",
@@ -273,46 +196,29 @@ export default function ArNavigation() {
             });
           }
         }
-
         if (!isMounted) return;
-
         setLocationPermissionGranted(granted);
 
         if (!granted) {
           setSensorHeading(null);
           setHasHeadingSample(false);
-          return;
-        }
+          return;}
 
         setHasHeadingSample(false);
-
         const initialHeading = await LocationImpl.getHeadingAsync();
-        const initialValue =
-          typeof initialHeading?.trueHeading === "number" && initialHeading.trueHeading >= 0
-            ? initialHeading.trueHeading
-            : typeof initialHeading?.magHeading === "number"
-              ? initialHeading.magHeading
-              : null;
+        const initialValue = getHeadingValue(initialHeading);
 
         if (isMounted && typeof initialValue === "number") {
           setSensorHeading(initialValue);
-          setHasHeadingSample(true);
-        }
+          setHasHeadingSample(true);}
 
         subscription = await LocationImpl.watchHeadingAsync((heading: any) => {
           if (!isMounted) return;
 
-          const nextHeading =
-            typeof heading?.trueHeading === "number" && heading.trueHeading >= 0
-              ? heading.trueHeading
-              : typeof heading?.magHeading === "number"
-                ? heading.magHeading
-                : null;
-
+          const nextHeading = getHeadingValue(heading);
           if (typeof nextHeading === "number") {
             setSensorHeading(nextHeading);
-            setHasHeadingSample(true);
-          }
+            setHasHeadingSample(true);}
         });
       } catch {
         if (isMounted) {
@@ -324,7 +230,6 @@ export default function ArNavigation() {
     }
 
     startHeadingWatch();
-
     const appStateSubscription = AppState.addEventListener("change", (state) => {
       if (state === "active") {
         startHeadingWatch();
@@ -338,11 +243,9 @@ export default function ArNavigation() {
     };
   }, []);
 
-  const segments = useMemo(
-    () => route.summary?.instructionSegments || [],
-    [route.summary?.instructionSegments]
-  );
+  const segments = useMemo(() => route.summary?.instructionSegments || [], [route.summary?.instructionSegments]);
 
+  // Build one instruction per route segment
   const instructionItems = useMemo(
     () =>
       segments.map((segment: any, index: number) =>
@@ -358,10 +261,9 @@ export default function ArNavigation() {
   );
 
   const userCoord = ((livePosition as any)?.coords as [number, number] | null) ?? null;
-  const destinationFeature = useMemo(
-    () => navData.nodes?.features?.find((item: any) => item.properties?.id === destinationId) || null,
-    [destinationId, navData.nodes]
-  );
+  const destinationFeature = useMemo(() => navData.nodes?.features?.find((item: any) => item.properties?.id === destinationId) || null, [destinationId, navData.nodes]);
+
+  // Check if the user is already close to the destination
   const isAtDestination = useMemo(() => {
     if (!isStarted || !destinationFeature || !userCoord) return false;
 
@@ -369,6 +271,7 @@ export default function ArNavigation() {
     return Array.isArray(destinationCoords) && distanceMeters(userCoord, destinationCoords as [number, number]) <= 1.0;
   }, [destinationFeature, isStarted, userCoord]);
 
+  // Decide which instruction should be shown now
   const displayedInstructionIndex = useMemo(() => {
     if (!instructionItems.length) return 0;
     if (isAtDestination) return instructionItems.length - 1;
@@ -390,8 +293,8 @@ export default function ArNavigation() {
 
   const currentSegment = segments[displayedInstructionIndex] || null;
   const nextSegment = segments[displayedInstructionIndex + 1] || null;
-  const nextInstruction = instructionItems[displayedInstructionIndex] || null;
 
+  // Progress inside the current segment
   const activeInstructionProgress = useMemo(() => {
     if (!userCoord) return 0;
     const coords = currentSegment?.geojson?.features?.[0]?.geometry?.coordinates || [];
@@ -436,6 +339,7 @@ export default function ArNavigation() {
     return bestProgress;
   }, [currentSegment, userCoord]);
 
+  // Distance to the end of the current segment
   const activeInstructionDistanceToEnd = useMemo(() => {
     if (!userCoord) return Infinity;
     const coords = currentSegment?.geojson?.features?.[0]?.geometry?.coordinates || [];
@@ -443,6 +347,7 @@ export default function ArNavigation() {
     return distanceMeters(userCoord, coords[coords.length - 1]);
   }, [currentSegment, userCoord]);
 
+  // Show the next turn a bit early when close enough
   const bannerInstruction = useMemo(() => {
     const currentInstruction = instructionItems[displayedInstructionIndex] || null;
     const followingInstruction = instructionItems[displayedInstructionIndex + 1] || null;
@@ -483,6 +388,7 @@ export default function ArNavigation() {
     segments,
   ]);
 
+  // Main hint used by the AR guide
   const arHint = useMemo(() => {
     const maneuver = bannerInstruction?.maneuver;
     if (typeof maneuver === "string" && maneuver.length > 0) return maneuver;
@@ -493,6 +399,7 @@ export default function ArNavigation() {
 
   const hasActiveRoute = Boolean(destinationId && route?.ok && segments.length);
 
+  // Use the best heading source we have
   const activeHeading = useMemo(() => {
     if (typeof optitrackHeading === "number") return optitrackHeading;
     if (typeof smoothedSensorHeading === "number") return smoothedSensorHeading;
@@ -501,15 +408,16 @@ export default function ArNavigation() {
 
   const hasUsableHeading = typeof activeHeading === "number" && Number.isFinite(activeHeading);
 
+  // Smooth raw phone heading
   useEffect(() => {
     if (typeof sensorHeading !== "number" || !Number.isFinite(sensorHeading)) {
       setSmoothedSensorHeading(null);
       return;
     }
-
     setSmoothedSensorHeading((previous) => smoothHeading(previous, sensorHeading));
   }, [sensorHeading]);
 
+  // Heading the user should face for the route
   const targetHeading = useMemo(() => {
     const nextCoords = nextSegment?.geojson?.features?.[0]?.geometry?.coordinates || [];
     const currentCoords = currentSegment?.geojson?.features?.[0]?.geometry?.coordinates || [];
@@ -523,13 +431,14 @@ export default function ArNavigation() {
     return null;
   }, [currentSegment, nextSegment]);
 
+  // Difference between current heading and route heading
   const headingError = useMemo(() => {
     if (typeof activeHeading !== "number" || typeof targetHeading !== "number") return 0;
     return normalizeAngleDelta(targetHeading - activeHeading);
   }, [activeHeading, targetHeading]);
 
   const arrowOffsetX = useMemo(() => {
-    // 1 degree â‰ˆ 2.2 px, clamped for readability.
+    // Calculate error 
     return clamp(headingError * 2.2, -130, 130);
   }, [headingError]);
 
@@ -540,11 +449,12 @@ export default function ArNavigation() {
 
   const arrowScale = useMemo(() => {
     if (!instructionDistanceMeters || instructionDistanceMeters <= 0) return 1;
-    // larger when closer, smaller when farther
+    // Bigger if the distance is small, smaller if the distance is large
     const raw = 1.35 - instructionDistanceMeters / 30;
     return clamp(raw, 0.85, 1.35);
   }, [instructionDistanceMeters]);
 
+  // Ccalibration text to show the user
   const directionCaption = useMemo(() => {
     if (typeof activeHeading !== "number" || typeof targetHeading !== "number") {
       return "Apunte el telefono hacia la ruta";
@@ -558,12 +468,14 @@ export default function ArNavigation() {
 
   const bannerIconName = useMemo(() => getBannerIconName(arHint), [arHint]);
 
+  // Reset spoken instruction when navigation stops
   useEffect(() => {
     if (!isStarted) {
       lastSpokenInstructionKeyRef.current = null;
     }
   }, [destinationId, isStarted]);
 
+  // Read each new instruction only once
   useEffect(() => {
     if (!isStarted || !soundEnabled || !bannerInstruction?.title) return;
 
@@ -578,6 +490,7 @@ export default function ArNavigation() {
     });
   }, [bannerInstruction?.detail, bannerInstruction?.title, displayedInstructionIndex, isStarted, soundEnabled]);
 
+  // Wait a bit before showing the compass help hint
   useEffect(() => {
     if (hasUsableHeading) {
       setShowHeadingGraceHint(false);
@@ -591,22 +504,21 @@ export default function ArNavigation() {
     return () => clearTimeout(timeout);
   }, [hasUsableHeading]);
 
+  // Hide the blocker once heading is ready
   useEffect(() => {
     if (!showHeadingBlocker) return;
-
     if (hasUsableHeading) {
       setShowHeadingReady(true);
       const timeout = setTimeout(() => {
         setShowHeadingReady(false);
         setShowHeadingBlocker(false);
       }, 1400);
-
       return () => clearTimeout(timeout);
     }
-
     setShowHeadingReady(false);
   }, [hasUsableHeading, showHeadingBlocker]);
 
+  // Text shown inside the heading blocker
   const headingBlockerState = useMemo(() => {
     if (showHeadingReady) {
       return {
@@ -679,9 +591,10 @@ export default function ArNavigation() {
   const transitionZoneOptions = useMemo(() => {
     if (!userCoord || !navData.nodes) return [];
 
-    const options = (navData.nodes.features || [])
+    const list = (navData.nodes.features || [])
       .filter((feature: any) => {
         const role = feature?.properties?.role;
+        // keep only stairs and elevator nodes that are closer than 2 meters
         if (!["stairs", "elevator"].includes(role)) return false;
         return distanceMeters(userCoord, feature.geometry?.coordinates) <= 2.0;
       })
@@ -693,43 +606,62 @@ export default function ArNavigation() {
       .filter((option: any, index: number, list: any[]) =>
         index === list.findIndex((item) => item.floor === option.floor)
       );
-
-    return options.sort((a: any, b: any) => (a.floor ?? 0) - (b.floor ?? 0));
+      // return options sorted by floor
+    return list.sort((a: any, b: any) => (a.floor ?? 0) - (b.floor ?? 0));
   }, [navData.nodes, userCoord]);
 
+  // Showw floor info when near a transition
   const visibleFloorOptions = useMemo(() => {
     if (!isStarted) return [];
     if (transitionZoneOptions.length > 1) return transitionZoneOptions;
     if (isCrossFloorSegment(currentSegment)) {
       const fromFloor = currentSegment?.floor ?? null;
       const toFloor = currentSegment?.toFloor ?? null;
+      const role = getNodeRole(navData.nodes, currentSegment?.fromNodeId) || "transition";
+
       return [fromFloor, toFloor]
         .filter((floor, index, list) => floor !== null && list.indexOf(floor) === index)
         .sort((a: any, b: any) => a - b)
-        .map((floor: any) => ({ floor, role: getNodeRole(navData.nodes, currentSegment?.fromNodeId) || "transition" }));
+        .map((floor: any) => ({ floor, role }));
     }
     return [];
   }, [currentSegment, isStarted, navData.nodes, transitionZoneOptions]);
 
+  // Small status label at the bottom right
   const arStatusMessage = useMemo(() => {
     if (isStarted && visibleFloorOptions.length > 1) {
-      const roleLabel = visibleFloorOptions[0]?.role || "transiciÃ³n";
+      const roleLabel = visibleFloorOptions[0]?.role || "transición";
       const floorsText = visibleFloorOptions.map((option: any) => `P${option.floor}`).join(" / ");
-      return `Cerca de ${roleLabel} Â· ${floorsText}`;
+      return `Cerca de ${roleLabel} · ${floorsText}`;
     }
     return `Planta ${currentFloor ?? "-"}`;
   }, [currentFloor, isStarted, visibleFloorOptions]);
 
+  // Compute a route and save it in the store
   const computeAndStoreRoute = useCallback(
     (startId: string, reason: string | null = null, preferOverride?: "stairs" | "elevator") => {
-      if (!destinationId) {
-        return false;
-      }
+      if (!destinationId) return false;
 
       const effectivePrefer = preferOverride ?? prefer;
+      const routeTimingCategory =
+        reason === null || reason === "initial" || (reason === "destination-change" && !isStarted)
+          ? "initial-route"
+          : "reroute";
+      const startedAt = Date.now();
       const result = computeRoute(navData.nodes, navData.edges, startId, destinationId, { prefer: effectivePrefer });
+      const computeDurationMs = Date.now() - startedAt;
 
       if (!result.ok) {
+        trackEvent("route.compute_failed", {
+          startId,
+          destinationId,
+          prefer: effectivePrefer,
+          reason: reason || result.reason || null,
+          routeError: result.reason || null,
+          routeTimingCategory,
+          computeDurationMs,
+          sourceView: "ar",
+        });
         setRoute({
           ok: false,
           geojson: null,
@@ -752,15 +684,28 @@ export default function ArNavigation() {
         reason,
       });
 
+      trackEvent("route.computed", {
+        startId,
+        destinationId,
+        prefer: effectivePrefer,
+        reason: reason || "initial",
+        routeTimingCategory,
+        totalMeters: result.summary?.totalMeters ?? null,
+        etaMinutes: result.summary?.etaMinutes ?? null,
+        destinationFloor: result.summary?.destinationFloor ?? null,
+        computeDurationMs,
+        sourceView: "ar",
+      });
+
       return true;
     },
-    [destinationId, navData.edges, navData.nodes, prefer, setRoute]
+    [destinationId, isStarted, navData.edges, navData.nodes, prefer, setRoute]
   );
 
+  // Change stairs or elevator mode and reroute if needed
   const handlePreferencePress = useCallback(() => {
     const nextPrefer = prefer === "stairs" ? "elevator" : "stairs";
     setNavigationPreference(nextPrefer);
-
     if (!isStarted || !destinationId) {
       return;
     }
@@ -777,28 +722,43 @@ export default function ArNavigation() {
     start.nodeId,
   ]);
 
+  // Leave AR and go back to the normal map screen
+  const handleReturnToMap = useCallback(() => {
+    trackEvent("navigation.guidance_mode_changed", {
+      fromMode: "ar",
+      toMode: "2d",
+      destinationId,
+      activeStepIndex,
+      routeElapsedSeconds: routeStartedAtMs
+        ? Math.round((Date.now() - routeStartedAtMs) / 1000)
+        : null,
+    });
+    router.replace("/navigate");
+  }, [activeStepIndex, destinationId, routeStartedAtMs]);
+
   return (
     <View style={[styles.screen, { backgroundColor: palette.background }]}>
       {isCameraNativeAvailable && cameraPermission?.granted ? (
         <CameraViewImpl facing="back" style={styles.camera} />
       ) : !isCameraNativeAvailable ? (
         <View style={styles.permissionFallback}>
-          <Text style={styles.permissionTitle}>MÃ³dulo de cÃ¡mara no disponible</Text>
+          <Text style={styles.permissionTitle}>Módulo de cámara no disponible</Text>
           <Text style={styles.permissionBody}>
-            Esta versiÃ³n de desarrollo no incluye Expo Camera. Vuelva a compilar e instale de nuevo el cliente.
+            Esta versión de desarrollo no incluye Expo Camera. Vuelva a compilar e instale de nuevo el cliente.
           </Text>
         </View>
       ) : (
         <View style={styles.permissionFallback}>
-          <Text style={styles.permissionTitle}>Se necesita permiso de cÃ¡mara</Text>
-          <Text style={styles.permissionBody}>Permita el acceso a la cÃ¡mara para ver las flechas de RA.</Text>
+          <Text style={styles.permissionTitle}>Se necesita permiso de cámara</Text>
+          <Text style={styles.permissionBody}>Permita el acceso a la cámara para ver las flechas de RA.</Text>
           <Pressable style={styles.permissionButton} onPress={requestCameraPermission}>
-            <Text style={styles.permissionButtonText}>Permitir cÃ¡mara</Text>
+            <Text style={styles.permissionButtonText}>Permitir cámara</Text>
           </Pressable>
         </View>
       )}
 
       <View pointerEvents="box-none" style={styles.overlay}>
+        {/* Instruction header */}
         <View style={[styles.instructionCard, { paddingTop: Math.max(insets.top, 14) + 8 }]}>
           <View style={styles.instructionHeaderRow}>
             <MaterialCommunityIcons
@@ -816,10 +776,10 @@ export default function ArNavigation() {
                 maxFontSizeMultiplier={1}
               >
                 {!hasActiveRoute
-                  ? "Inicie la navegaciÃ³n para ver guÃ­a en cÃ¡mara"
+                  ? "Inicie la navegación para ver guía en cámara"
                   : !isStarted
-                    ? "Inicie la navegaciÃ³n para ver guÃ­a en cÃ¡mara"
-                    : bannerInstruction?.title || "ContinÃºe"}
+                    ? "Inicie la navegación para ver guía en cámara"
+                    : bannerInstruction?.title || "Continúe"}
               </Text>
 
               {isStarted && bannerInstruction?.detail ? (
@@ -830,10 +790,12 @@ export default function ArNavigation() {
           </View>
         </View>
 
+        {/* Side button bar */}
         <View style={[styles.mapActions, { top: Math.max(insets.top, 12) + 112 }]}>
-          <Pressable style={styles.actionButton} onPress={() => router.replace("/navigate")}>
+          <Pressable style={styles.actionButton} onPress={handleReturnToMap}>
             <Ionicons name="map-outline" size={28} color={palette.background} />
           </Pressable>
+          {/* Toggle stairs/elevator preference */}
           <Pressable style={styles.actionButton} onPress={handlePreferencePress}>
             <MaterialCommunityIcons
               name={prefer === "stairs" ? "stairs" : "elevator"}
@@ -841,6 +803,7 @@ export default function ArNavigation() {
               color={palette.background}
             />
           </Pressable>
+          {/* Toggle sound for spoken instructions */}
           <Pressable style={styles.actionButton} onPress={() => setSoundEnabled(!soundEnabled)}>
             <Ionicons
               name={soundEnabled ? "volume-high" : "volume-mute"}
@@ -848,6 +811,7 @@ export default function ArNavigation() {
               color={palette.background}
             />
           </Pressable>
+          {/* Help button */}
           <Pressable style={styles.actionButton} onPress={() => router.push("/help")}>
             <Ionicons name="help" size={28} color={palette.background} />
           </Pressable>
@@ -855,6 +819,7 @@ export default function ArNavigation() {
 
         {isStarted && hasActiveRoute ? (
           <View style={styles.arrowZone}>
+            {/* Display short text for orientation */}
             <View style={styles.directionCaptionWrap}>
               <Text style={styles.directionCaption}>{directionCaption}</Text>
             </View>
@@ -886,6 +851,7 @@ export default function ArNavigation() {
               </View>
             )}
 
+            {/* Arrow and main guide for AR */}
             <View
               style={[
                 styles.arrowFloating,
@@ -900,14 +866,14 @@ export default function ArNavigation() {
               {arHint === "arrive" ? (
                 <MaterialCommunityIcons name="map-marker-check" size={132} color="#A9F2C0" />
               ) : null}
-
+              {/* Illusion to make the arrows be on the floor */}
               {isFloorGuideHint(arHint) ? (
                 <View style={styles.floorGuidePlane}>
                   <View style={styles.floorGuideField}>
                   {Array.from({ length: 12 }).map((_, index, list) => {
                     const progress = index / Math.max(1, list.length - 1);
                     const shift = getFloorGuideShift(floorGuideVariant, progress);
-                    const color = FLOOR_GUIDE_COLORS[index % FLOOR_GUIDE_COLORS.length];
+                    const color = ["#55F5FF", "#1739FF"][index % 2];
                     const width = 72 + progress * 190;
                     const pointWidth = 24 + progress * 110;
                     const pointHeight = 9 + progress * 10;
@@ -972,6 +938,7 @@ export default function ArNavigation() {
               ) : null}
             </View>
 
+            {/* Calibration bar on the bottom */}
             <View style={styles.alignmentBarWrap}>
               <View style={styles.alignmentBar} />
               <View
@@ -988,6 +955,7 @@ export default function ArNavigation() {
       </View>
 
       {showHeadingBlocker && isCameraNativeAvailable && cameraPermission?.granted && isStarted && hasActiveRoute ? (
+        /* Display messages and block AR */
         <View style={styles.blockerScrim}>
           <View
             style={[
@@ -1010,7 +978,7 @@ export default function ArNavigation() {
             <Text style={styles.blockerTitle}>{headingBlockerState.title}</Text>
             <Text style={styles.blockerBody}>{headingBlockerState.body}</Text>
             {!showHeadingReady ? (
-              <Pressable style={styles.blockerExitButton} onPress={() => router.replace("/navigate")}>
+              <Pressable style={styles.blockerExitButton} onPress={handleReturnToMap}>
                 <Text style={styles.blockerExitButtonText}>Salir de RA</Text>
               </Pressable>
             ) : null}
@@ -1026,45 +994,13 @@ const styles = StyleSheet.create({
   camera: { ...StyleSheet.absoluteFillObject },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(8, 15, 18, 0.16)" },
 
-  instructionCard: {
-    marginHorizontal: 10,
-    borderRadius: 24,
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    backgroundColor: AppPalette.primary,
-  },
-  instructionHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  instructionHeaderIcon: {
-    marginRight: 12,
-  },
-  instructionTextWrap: {
-    flex: 1,
-  },
-  instructionTitle: {
-    fontSize: 24,
-    fontWeight: "800",
-    color: AppPalette.textPrimary,
-    lineHeight: 30,
-  },
-  instructionDetail: {
-    marginTop: 4,
-    fontSize: 14,
-    fontWeight: "700",
-    color: "rgba(29, 27, 32, 0.78)",
-  },
-  mapActions: {
-    position: "absolute",
-    right: 16,
-    zIndex: 3,
-    gap: 12,
-    backgroundColor: "rgba(255,255,255,0.55)",
-    borderRadius: 18,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-  },
+  instructionCard: { marginHorizontal: 10, borderRadius: 24, paddingHorizontal: 16, paddingBottom: 12, backgroundColor: AppPalette.primary },
+  instructionHeaderRow: { flexDirection: "row", alignItems: "center" },
+  instructionHeaderIcon: { marginRight: 12 },
+  instructionTextWrap: { flex: 1 },
+  instructionTitle: { fontSize: 24, fontWeight: "800", color: AppPalette.textPrimary, lineHeight: 30 },
+  instructionDetail: { marginTop: 4, fontSize: 14, fontWeight: "700", color: "rgba(29, 27, 32, 0.78)" },
+  mapActions: { position: "absolute", right: 16, zIndex: 3, gap: 12, backgroundColor: "rgba(255,255,255,0.55)", borderRadius: 18, paddingVertical: 10, paddingHorizontal: 8 },
   actionButton: {
     width: 52,
     height: 52,
@@ -1081,61 +1017,15 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
 
-  arrowZone: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 20,
-    paddingBottom: 80,
-  },
-  directionCaptionWrap: {
-    position: "absolute",
-    left: 18,
-    bottom: 8,
-    borderRadius: 16,
-    backgroundColor: AppPalette.primary,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  directionCaption: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: AppPalette.background,
-  },
-  arrowFloating: {
-    position: "absolute",
-    bottom: 58,
-    left: "50%",
-    marginLeft: -130,
-    width: 260,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  floorGuideField: {
-    width: "100%",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    gap: 0,
-  },
-  floorGuidePlane: {
-    width: "100%",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    transform: [{ perspective: 900 }, { rotateX: "68deg" }],
-  },
-  floorGuideArrow: {
-    alignItems: "center",
-    justifyContent: "flex-start",
-    marginBottom: -5,
-  },
-  floorGuideArrowPoint: {
-    width: 0,
-    height: 0,
-  },
-  stackCenter: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  arrowZone: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 20, paddingBottom: 80 },
+  directionCaptionWrap: { position: "absolute", left: 18, bottom: 8, borderRadius: 16, backgroundColor: AppPalette.primary, paddingHorizontal: 16, paddingVertical: 10 },
+  directionCaption: { fontSize: 16, fontWeight: "800", color: AppPalette.background },
+  arrowFloating: { position: "absolute", bottom: 58, left: "50%", marginLeft: -130, width: 260, alignItems: "center", justifyContent: "center" },
+  floorGuideField: { width: "100%", alignItems: "center", justifyContent: "flex-end", gap: 0 },
+  floorGuidePlane: { width: "100%", alignItems: "center", justifyContent: "flex-end", transform: [{ perspective: 900 }, { rotateX: "68deg" }] },
+  floorGuideArrow: { alignItems: "center", justifyContent: "flex-start", marginBottom: -5 },
+  floorGuideArrowPoint: { width: 0, height: 0 },
+  stackCenter: { alignItems: "center", justifyContent: "center" },
   floorArrowWrap: {
     alignItems: "center",
     justifyContent: "center",
@@ -1144,19 +1034,8 @@ const styles = StyleSheet.create({
     transform: [{ scaleX: 1.35 }, { scaleY: 0.8 }],
   },
 
-  alignmentBarWrap: {
-    position: "absolute",
-    bottom: 72,
-    width: "78%",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  alignmentBar: {
-    width: "100%",
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "rgba(255,255,255,0.28)",
-  },
+  alignmentBarWrap: { position: "absolute", bottom: 72, width: "78%", alignItems: "center", justifyContent: "center" },
+  alignmentBar: { width: "100%", height: 6, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.28)" },
   alignmentMarker: {
     position: "absolute",
     marginLeft: -8,
@@ -1177,32 +1056,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
-  statusPillInteractive: {
-    backgroundColor: "#2A7C8E",
-  },
-  statusPillText: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: AppPalette.background,
-  },
-  floorSwitchRow: {
-    position: "absolute",
-    right: 24,
-    bottom: 8,
-    flexDirection: "row",
-    gap: 8,
-  },
-  floorPillButton: {
-    position: "relative",
-    right: 0,
-    bottom: 0,
-  },
-  floorPillButtonInactive: {
-    backgroundColor: AppPalette.background,
-  },
-  floorPillTextInactive: {
-    color: AppPalette.textPrimary,
-  },
+  statusPillInteractive: { backgroundColor: "#2A7C8E" },
+  statusPillText: { fontSize: 16, fontWeight: "800", color: AppPalette.background },
+  floorSwitchRow: { position: "absolute", right: 24, bottom: 8, flexDirection: "row", gap: 8 },
+  floorPillButton: { position: "relative", right: 0, bottom: 0 },
+  floorPillButtonInactive: { backgroundColor: AppPalette.background },
+  floorPillTextInactive: { color: AppPalette.textPrimary },
 
   permissionFallback: {
     ...StyleSheet.absoluteFillObject,
@@ -1211,19 +1070,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     backgroundColor: "#0D1B22",
   },
-  permissionTitle: {
-    fontSize: 24,
-    fontWeight: "800",
-    color: "#FFFFFF",
-    textAlign: "center",
-  },
-  permissionBody: {
-    marginTop: 8,
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#CBE6EE",
-    textAlign: "center",
-  },
+  permissionTitle: { fontSize: 24, fontWeight: "800", color: "#FFFFFF", textAlign: "center" },
+  permissionBody: { marginTop: 8, fontSize: 14, fontWeight: "600", color: "#CBE6EE", textAlign: "center" },
   permissionButton: {
     marginTop: 16,
     borderRadius: 14,
@@ -1256,9 +1104,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "rgba(29, 27, 32, 0.14)",
   },
-  blockerCardSuccess: {
-    backgroundColor: "#DDF4E3",
-  },
+  blockerCardSuccess: { backgroundColor: "#DDF4E3" },
   blockerIconWrap: {
     width: 72,
     height: 72,
@@ -1268,9 +1114,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.55)",
     marginBottom: 14,
   },
-  blockerIconWrapSuccess: {
-    backgroundColor: "rgba(255,255,255,0.72)",
-  },
+  blockerIconWrapSuccess: { backgroundColor: "rgba(255,255,255,0.72)" },
   blockerTitle: {
     fontSize: 24,
     lineHeight: 30,

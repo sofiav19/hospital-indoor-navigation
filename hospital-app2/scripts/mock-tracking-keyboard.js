@@ -1,25 +1,16 @@
-#!/usr/bin/env node
-
+// Script to send location via websocket for testing
 const PORT = 8080;
 const START_X = 0;
 const START_Y = 0;
 const STEP_X = 0.5;
 const STEP_Y = 0.5;
-
-let WebSocketServer;
-
-try {
-  ({ WebSocketServer } = require("ws"));
-} catch (error) {
-  console.error('Missing dependency "ws". Run: npm install ws');
-  process.exit(1);
-}
-
 let x = START_X;
 let y = START_Y;
 let stepX = STEP_X;
 let stepY = STEP_Y;
 
+let WebSocketServer; 
+({ WebSocketServer } = require("ws"));
 const wss = new WebSocketServer({ host: "0.0.0.0", port: PORT });
 
 function getPayload() {

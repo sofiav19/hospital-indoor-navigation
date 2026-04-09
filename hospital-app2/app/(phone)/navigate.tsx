@@ -7,12 +7,26 @@ import * as Speech from "expo-speech";
 import { useNavStore } from "../../store/navStore";
 import IndoorMap from "../../components/map/IndoorMap";
 import { computeRoute } from "../../lib/route/routeEngine";
-import { buildDetailedInstruction as buildSharedDetailedInstruction } from "../../lib/route/navigationInstructions";
+import {
+  buildDetailedInstruction as buildSharedDetailedInstruction,
+  formatInstructionForSpeech,
+  getHeadingFromSegment,
+  getImmediateTurnTitle,
+  getSegmentTurnHint,
+  isCrossFloorSegment,
+  segmentTouchesFloor,
+} from "../../lib/route/navigationInstructions";
+import {
+  distanceMeters,
+  getHeadingValue,
+  getNodeFeature,
+  getNodeRole,
+  smoothHeading,
+} from "../../lib/route/routeHelpers";
 import { HOSPITAL_DIRECTORY, normalizeSearchValue } from "../../lib/hospitalDirectory";
 import { AppPalette, useAppAppearance } from "../../constants/theme";
 import { projectCoordsForMap, projectGeoJSONForMap } from "../../lib/coords/localToLngLat";
-import { trackEvent } from "../../lib/telemetry";
-import { LOCATION_PRIVACY_NOTE } from "../../lib/appMetadata";
+import { trackEvent } from "../../lib/monitoring";
 
 let LocationImpl: any = null;
 
@@ -38,12 +52,6 @@ const TRANSITION_ZONE_RADIUS_METERS = 2.0;
 const OUTDOOR_HANDOFF_THRESHOLD_METERS = 12;
 const FONT_TITLE = Platform.select({ ios: "SF Pro Display", default: "sans-serif-medium" });
 const FONT_BODY = Platform.select({ ios: "Inter", default: "sans-serif" });
-
-function distanceMeters(a: [number, number], b: [number, number]) {
-  const dx = a[0] - b[0];
-  const dy = a[1] - b[1];
-  return Math.sqrt(dx * dx + dy * dy);
-}
 
 function distanceToPolyline(point: [number, number], coords: [number, number][]) {
   if (!Array.isArray(coords) || coords.length < 2) return Infinity;
@@ -74,122 +82,11 @@ function distanceToPolyline(point: [number, number], coords: [number, number][])
   return Math.sqrt(bestDistanceSq);
 }
 
-function getHeadingFromSegment(coords: [number, number][], point?: [number, number] | null) {
-  if (!Array.isArray(coords) || coords.length < 2) return 0;
-
-  let start = coords[0];
-  let end = coords[coords.length - 1];
-
-  if (point) {
-    let bestDistanceSq = Infinity;
-    for (let i = 1; i < coords.length; i++) {
-      const a = coords[i - 1];
-      const b = coords[i];
-      const segX = b[0] - a[0];
-      const segY = b[1] - a[1];
-      const segLenSq = segX * segX + segY * segY;
-      if (segLenSq <= 0) continue;
-
-      const tRaw = ((point[0] - a[0]) * segX + (point[1] - a[1]) * segY) / segLenSq;
-      const t = Math.max(0, Math.min(1, tRaw));
-      const projX = a[0] + segX * t;
-      const projY = a[1] + segY * t;
-      const dx = point[0] - projX;
-      const dy = point[1] - projY;
-      const distSq = dx * dx + dy * dy;
-
-      if (distSq < bestDistanceSq) {
-        bestDistanceSq = distSq;
-        start = a;
-        end = b;
-      }
-    }
-  }
-
-  const dx = end[0] - start[0];
-  const dy = end[1] - start[1];
-  if (dx === 0 && dy === 0) return 0;
-
-  const bearing = (Math.atan2(dx, dy) * 180) / Math.PI;
-  return (bearing + 360) % 360;
-}
-
-function headingToCardinal(heading: number) {
-  const normalized = ((heading % 360) + 360) % 360;
-  if (normalized >= 45 && normalized < 135) return "este";
-  if (normalized >= 135 && normalized < 225) return "sur";
-  if (normalized >= 225 && normalized < 315) return "oeste";
-  return "norte";
-}
-
-function normalizeAngleDelta(delta: number) {
-  if (delta > 180) return delta - 360;
-  if (delta < -180) return delta + 360;
-  return delta;
-}
-
-function smoothHeading(previous: number | null, next: number) {
-  if (!Number.isFinite(next)) return previous;
-  if (previous === null || !Number.isFinite(previous)) return next;
-
-  const delta = normalizeAngleDelta(next - previous);
-  const absDelta = Math.abs(delta);
-  if (absDelta < 1) return previous;
-
-  // Dynamic smoothing: track fast real turns without becoming jittery when near target.
-  const gain = absDelta > 45 ? 0.55 : absDelta > 20 ? 0.35 : 0.22;
-  return (previous + delta * gain + 360) % 360;
-}
-
-function getSegmentTurnHint(currentSegment: any, nextSegment: any) {
-  const currentCoords = currentSegment?.geojson?.features?.[0]?.geometry?.coordinates || [];
-  const nextCoords = nextSegment?.geojson?.features?.[0]?.geometry?.coordinates || [];
-
-  if (!Array.isArray(currentCoords) || currentCoords.length < 2) return "forward" as const;
-  if (!Array.isArray(nextCoords) || nextCoords.length < 2) return "forward" as const;
-
-  const currentHeading = getHeadingFromSegment(currentCoords);
-  const nextHeading = getHeadingFromSegment(nextCoords);
-  const delta = normalizeAngleDelta(nextHeading - currentHeading);
-  const absDelta = Math.abs(delta);
-
-  if (absDelta < 22) return "forward" as const;
-  if (delta < 0) return absDelta >= 60 ? ("left" as const) : ("left-forward" as const);
-  return absDelta >= 60 ? ("right" as const) : ("right-forward" as const);
-}
-
-function getTurnFromPreviousSegment(previousSegment: any, currentSegment: any) {
-  if (!previousSegment || !currentSegment) return "forward" as const;
-
-  const previousCoords = previousSegment?.geojson?.features?.[0]?.geometry?.coordinates || [];
-  const currentCoords = currentSegment?.geojson?.features?.[0]?.geometry?.coordinates || [];
-
-  if (!Array.isArray(previousCoords) || previousCoords.length < 2) return "forward" as const;
-  if (!Array.isArray(currentCoords) || currentCoords.length < 2) return "forward" as const;
-
-  const previousHeading = getHeadingFromSegment(previousCoords);
-  const currentHeading = getHeadingFromSegment(currentCoords);
-  const delta = normalizeAngleDelta(currentHeading - previousHeading);
-  const absDelta = Math.abs(delta);
-
-  if (absDelta < 22) return "forward" as const;
-  if (delta < 0) return absDelta >= 60 ? ("left" as const) : ("left-forward" as const);
-  return absDelta >= 60 ? ("right" as const) : ("right-forward" as const);
-}
-
-function getImmediateTurnTitle(maneuver: string | null | undefined) {
-  if (maneuver === "left") return "Gire a la izquierda";
-  if (maneuver === "right") return "Gire a la derecha";
-  if (maneuver === "left-forward") return "Gire ligeramente a la izquierda";
-  if (maneuver === "right-forward") return "Gire ligeramente a la derecha";
-  return null;
-}
 
 function getNearestNodeId(
   nodes: any,
   point: [number, number],
   floor: number | null,
-  destinationId?: string | null,
   allowedIds?: Set<string>,
   maxDistanceMeters?: number
 ) {
@@ -281,71 +178,6 @@ function getProgressAlongPolyline(point: [number, number], coords: [number, numb
   return bestProgress;
 }
 
-function getLookAheadCoordOnSegment(
-  point: [number, number],
-  coords: [number, number][],
-  lookAheadMeters = 2.4
-) {
-  if (!Array.isArray(coords) || coords.length < 2) return null;
-
-  let bestDistanceSq = Infinity;
-  let bestSegmentIndex = 0;
-  let bestT = 0;
-
-  for (let i = 1; i < coords.length; i++) {
-    const start = coords[i - 1];
-    const end = coords[i];
-    const segX = end[0] - start[0];
-    const segY = end[1] - start[1];
-    const segLenSq = segX * segX + segY * segY;
-    if (segLenSq <= 0) continue;
-
-    const tRaw =
-      ((point[0] - start[0]) * segX + (point[1] - start[1]) * segY) / segLenSq;
-    const t = Math.max(0, Math.min(1, tRaw));
-    const projX = start[0] + segX * t;
-    const projY = start[1] + segY * t;
-    const dx = point[0] - projX;
-    const dy = point[1] - projY;
-    const distSq = dx * dx + dy * dy;
-
-    if (distSq < bestDistanceSq) {
-      bestDistanceSq = distSq;
-      bestSegmentIndex = i - 1;
-      bestT = t;
-    }
-  }
-
-  let remainingMeters = lookAheadMeters;
-  let startIndex = bestSegmentIndex;
-  let startT = bestT;
-
-  while (startIndex < coords.length - 1) {
-    const start = coords[startIndex];
-    const end = coords[startIndex + 1];
-    const segX = end[0] - start[0];
-    const segY = end[1] - start[1];
-    const segLen = Math.sqrt(segX * segX + segY * segY);
-    if (segLen <= 0) {
-      startIndex += 1;
-      startT = 0;
-      continue;
-    }
-
-    const usableSegLen = segLen * (1 - startT);
-    if (remainingMeters <= usableSegLen) {
-      const t = startT + remainingMeters / segLen;
-      return [start[0] + segX * t, start[1] + segY * t] as [number, number];
-    }
-
-    remainingMeters -= usableSegLen;
-    startIndex += 1;
-    startT = 0;
-  }
-
-  return coords[coords.length - 1] || null;
-}
-
 function getEquivalentNodeIdOnFloor(
   nodes: any,
   nodeId: string | null,
@@ -396,187 +228,10 @@ function isNodeOnFloor(nodes: any, nodeId: string | null, floor: number | null) 
   return (feature?.properties?.floor ?? null) === floor;
 }
 
-function getNodeFeature(nodes: any, nodeId: string | null) {
-  if (!nodeId) return null;
-  return (nodes?.features || []).find((feature: any) => feature?.properties?.id === nodeId) || null;
-}
-
 function getNodeLabel(nodes: any, nodeId: string | null) {
   const directoryLabel =
     HOSPITAL_DIRECTORY.find((entry) => entry.destinationNodeId === nodeId)?.name || null;
   return directoryLabel || getNodeFeature(nodes, nodeId)?.properties?.label || null;
-}
-
-function getNodeRole(nodes: any, nodeId: string | null) {
-  return getNodeFeature(nodes, nodeId)?.properties?.role || null;
-}
-
-function isCrossFloorSegment(segment: any) {
-  const fromFloor = segment?.floor ?? null;
-  const toFloor = segment?.toFloor ?? null;
-  return fromFloor !== null && toFloor !== null && fromFloor !== toFloor;
-}
-
-function segmentTouchesFloor(segment: any, floor: number | null) {
-  if (!segment || floor === null) return true;
-  return segment?.floor === floor || segment?.toFloor === floor;
-}
-
-function buildInstructionFromSegment(segment: any, nodes: any, destinationId: string | null) {
-  if (!segment) return null;
-
-  const fromFloor = segment?.floor ?? null;
-  const toFloor = segment?.toFloor ?? fromFloor;
-  const fromNodeId = segment?.fromNodeId ?? null;
-  const toNodeId = segment?.toNodeId ?? null;
-  const fromLabel = getNodeLabel(nodes, fromNodeId);
-  const toLabel = getNodeLabel(nodes, toNodeId);
-  const transitionRole = getNodeRole(nodes, fromNodeId) || getNodeRole(nodes, toNodeId);
-  const isCrossFloor = isCrossFloorSegment(segment);
-  const isArrival = Boolean(destinationId && toNodeId === destinationId);
-
-  const segmentMeters =
-    typeof segment?.meters === "number"
-      ? Math.round(segment.meters)
-      : typeof segment?.distanceMeters === "number"
-        ? Math.round(segment.distanceMeters)
-        : null;
-
-  let title = "Continúe";
-  let detail: string | null = segmentMeters !== null ? `Aproximadamente ${segmentMeters} m` : null;
-
-  if (isCrossFloor) {
-    const goingUp = (toFloor ?? 0) > (fromFloor ?? 0);
-    if (transitionRole === "elevator") {
-      title = goingUp
-        ? `Tome el ascensor a la planta ${toFloor}`
-        : `Tome el ascensor hacia la planta ${toFloor}`;
-    } else if (transitionRole === "stairs") {
-      title = goingUp
-        ? `Suba por las escaleras a la planta ${toFloor}`
-        : `Baje por las escaleras a la planta ${toFloor}`;
-    } else {
-      title = `Vaya a la planta ${toFloor}`;
-    }
-    detail = null;
-  } else if (isArrival) {
-    title = `Ha llegado a ${toLabel || "su destino"}`;
-    detail = null;
-  } else if (toLabel && fromLabel && toLabel !== fromLabel) {
-    title = `Continúe hacia ${toLabel}`;
-    detail = segmentMeters !== null ? `Aproximadamente ${segmentMeters} m` : null;
-  } else if (toLabel) {
-    title = `Diríjase hacia ${toLabel}`;
-    detail = segmentMeters !== null ? `Aproximadamente ${segmentMeters} m` : null;
-  } else if (toFloor !== null) {
-    title = `Continúe en la planta ${toFloor}`;
-    detail = segmentMeters !== null ? `Aproximadamente ${segmentMeters} m` : null;
-  }
-
-  return {
-    title,
-    detail,
-    fromFloor,
-    toFloor,
-    fromNodeId,
-    toNodeId,
-  };
-}
-
-function buildDetailedInstruction(
-  segment: any,
-  previousSegment: any,
-  nextSegment: any,
-  nodes: any,
-  destinationId: string | null
-) {
-  const base = buildInstructionFromSegment(segment, nodes, destinationId);
-  if (!base) return null;
-
-  const isCrossFloor = isCrossFloorSegment(segment);
-  const isArrival = Boolean(destinationId && segment?.toNodeId === destinationId);
-  const transitionRole = getNodeRole(nodes, segment?.fromNodeId) || getNodeRole(nodes, segment?.toNodeId);
-  const toFloor = segment?.toFloor ?? segment?.floor ?? null;
-  const segmentMeters =
-    typeof segment?.meters === "number"
-      ? Math.round(segment.meters)
-      : typeof segment?.distanceMeters === "number"
-        ? Math.round(segment.distanceMeters)
-        : null;
-
-  const currentCoords = segment?.geojson?.features?.[0]?.geometry?.coordinates || [];
-  const heading = Array.isArray(currentCoords) && currentCoords.length >= 2 ? getHeadingFromSegment(currentCoords) : 0;
-  const headingCardinal = headingToCardinal(heading);
-
-  let maneuver: "forward" | "left" | "right" | "left-forward" | "right-forward" | "up" | "down" | "arrive" =
-    getTurnFromPreviousSegment(previousSegment, segment);
-
-  if (isCrossFloor) {
-    const fromFloor = segment?.floor ?? null;
-    const goingUp = (toFloor ?? 0) > (fromFloor ?? 0);
-    maneuver = goingUp ? "up" : "down";
-  }
-
-  if (isArrival) {
-    maneuver = "arrive";
-  }
-
-  let title = base.title;
-  let detail = base.detail || null;
-
-  if (isArrival) {
-    title = `Ha llegado a ${getNodeLabel(nodes, segment?.toNodeId) || "su destino"}`;
-    detail = "Siga la señalización del área para la orientación final.";
-  } else if (isCrossFloor) {
-    if (transitionRole === "elevator") {
-      title = maneuver === "up"
-        ? `Tome el ascensor a la planta ${toFloor}`
-        : `Tome el ascensor hacia la planta ${toFloor}`;
-      detail = "Espere junto al ascensor y continúe al salir.";
-    } else if (transitionRole === "stairs") {
-      title = maneuver === "up"
-        ? `Suba por las escaleras a la planta ${toFloor}`
-        : `Baje por las escaleras a la planta ${toFloor}`;
-      detail = "Manténgase a la derecha al usar la escalera.";
-    } else {
-      title = `Cambie a la planta ${toFloor}`;
-      detail = "Siga la indicación de planta y continúe la ruta.";
-    }
-  } else {
-    if (maneuver === "left") {
-      title = `Gire a la izquierda y continúe ${segmentMeters ?? ""}${segmentMeters ? " m" : ""}`.trim();
-    } else if (maneuver === "right") {
-      title = `Gire a la derecha y continúe ${segmentMeters ?? ""}${segmentMeters ? " m" : ""}`.trim();
-    } else if (maneuver === "left-forward") {
-      title = `Leve giro a la izquierda y avance ${segmentMeters ?? ""}${segmentMeters ? " m" : ""}`.trim();
-    } else if (maneuver === "right-forward") {
-      title = `Leve giro a la derecha y avance ${segmentMeters ?? ""}${segmentMeters ? " m" : ""}`.trim();
-    } else {
-      title = `Avance recto ${segmentMeters ? `durante ${segmentMeters} m` : ""}`.trim();
-    }
-
-    const toLabel = getNodeLabel(nodes, segment?.toNodeId);
-    const nextTurn = getSegmentTurnHint(segment, nextSegment);
-    const nextTurnText =
-      nextTurn === "left"
-        ? "Próximo giro: izquierda."
-        : nextTurn === "right"
-          ? "Próximo giro: derecha."
-          : nextTurn === "left-forward"
-            ? "Próximo desvío suave: izquierda."
-            : nextTurn === "right-forward"
-              ? "Próximo desvío suave: derecha."
-              : "Continúe por el pasillo principal.";
-
-    detail = `${toLabel ? `Diríjase hacia ${toLabel}. ` : ""}Dirección ${headingCardinal}. ${nextTurnText}`.trim();
-  }
-
-  return {
-    ...base,
-    title,
-    detail,
-    maneuver,
-  };
 }
 
 function getInstructionIconName(maneuver?: string | null) {
@@ -601,10 +256,6 @@ function getInstructionIconName(maneuver?: string | null) {
   }
 }
 
-function formatInstructionForSpeech(title: string) {
-  return title.replace(/(\d+)\s?m\b/g, "$1 metros");
-}
-
 export default function Navigate() {
   const { palette } = useAppAppearance();
   const [showSteps, setShowSteps] = useState(false);
@@ -620,12 +271,13 @@ export default function Navigate() {
   const [transitionFloorLock, setTransitionFloorLock] = useState<number | null>(null);
   const [hasManualFloorSelection, setHasManualFloorSelection] = useState(false);
   const [showRerouteNotice, setShowRerouteNotice] = useState(false);
+  const [routePreferenceNotice, setRoutePreferenceNotice] = useState<string | null>(null);
   const [recenterTick, setRecenterTick] = useState(0);
   const [isManualMapControl, setIsManualMapControl] = useState(false);
   const [sensorHeading, setSensorHeading] = useState<number | null>(null);
   const [smoothedLiveHeading, setSmoothedLiveHeading] = useState<number | null>(null);
-  const [recenterHeading, setRecenterHeading] = useState(0);
-  const [recenterRequestedAt, setRecenterRequestedAt] = useState(0);
+const [recenterHeading, setRecenterHeading] = useState(0);
+const [recenterRequestedAt, setRecenterRequestedAt] = useState(0);
   const lastSpokenInstructionKeyRef = useRef<string | null>(null);
 
   const insets = useSafeAreaInsets();
@@ -645,11 +297,11 @@ export default function Navigate() {
   const soundEnabled = useNavStore((s) => s.navigationUi.soundEnabled);
   const activeStepIndex = useNavStore((s) => s.navigationUi.activeStepIndex);
   const navigationFloor = useNavStore((s) => s.navigationUi.navigationFloor);
+  const routeStartedAtMs = useNavStore((s) => s.navigationUi.routeStartedAtMs);
 
   const setNavigationStarted = useNavStore((s) => s.setNavigationStarted);
   const setNavigationPreference = useNavStore((s) => s.setNavigationPreference);
   const setMapViewMode = useNavStore((s) => s.setMapViewMode);
-  const toggleNavigationPreference = useNavStore((s) => s.toggleNavigationPreference);
   const setSoundEnabled = useNavStore((s) => s.setSoundEnabled);
   const setActiveStepIndex = useNavStore((s) => s.setActiveStepIndex);
   const setNavigationFloor = useNavStore((s) => s.setNavigationFloor);
@@ -658,14 +310,13 @@ export default function Navigate() {
   const lastRerouteAtRef = useRef(0);
   const lastDestinationIdRef = useRef<string | null>(destinationId ?? null);
   const rerouteNoticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hasHandledArrivalRef = useRef(false);
-  const navigationStartedAtRef = useRef(0);
   const lastFollowRecenterAtRef = useRef(0);
   const lastFollowUserCoordRef = useRef<[number, number] | null>(null);
   const lastFollowStepIndexRef = useRef(-1);
   const hasShownLocationPrivacyNoteRef = useRef(false);
 
   const effectiveStartNodeId = postNavStartOverrideId || start.nodeId || "n_hospital_entrance_f0";
+  const followsCurrentLocation = start.source !== "manual-node";
 
   useEffect(() => {
     setMapViewMode("navigate");
@@ -673,7 +324,9 @@ export default function Navigate() {
 
   const userCoord = useMemo(() => {
     if (!navData.nodes) return null;
-    if (livePosition.provider !== "none" && livePosition.coords) return livePosition.coords;
+    if (livePosition.provider !== "none" && livePosition.coords) {
+      return livePosition.coords;
+    }
     if (start.coords) return start.coords;
 
     const feature = navData.nodes.features?.find((item: any) => item.properties?.id === effectiveStartNodeId);
@@ -708,29 +361,6 @@ export default function Navigate() {
     setRecenterRequestedAt(now);
     setRecenterTick((value) => value + 1);
   }, [activeStepIndex, lockedHeading, userCoord]);
-
-  const recenterTargetCoord = useMemo(() => {
-    if (!isStarted) return mapUserCoord;
-    if (!Array.isArray(segments) || !segments.length) return mapUserCoord;
-
-    for (let i = Math.max(0, activeStepIndex); i < segments.length; i++) {
-      const segment = segments[i];
-      if (!segmentTouchesFloor(segment, currentFloor)) continue;
-
-      const segmentCoords = segment?.geojson?.features?.[0]?.geometry?.coordinates || [];
-      if (!Array.isArray(segmentCoords) || segmentCoords.length < 2) continue;
-
-      const localTarget =
-        userCoord && i === activeStepIndex
-          ? getLookAheadCoordOnSegment(userCoord, segmentCoords)
-          : segmentCoords[Math.min(1, segmentCoords.length - 1)] ?? segmentCoords[0];
-
-      if (!localTarget) continue;
-      return projectCoordsForMap(localTarget);
-    }
-
-    return mapUserCoord;
-  }, [activeStepIndex, currentFloor, isStarted, mapUserCoord, segments, userCoord]);
 
   const startFeature = useMemo(
     () =>
@@ -825,10 +455,6 @@ export default function Navigate() {
       }))
       .filter((item: any) => Boolean(item.id));
   }, []);
-
-  const entranceStartOptions = useMemo(() => {
-    return startNodeOptions;
-  }, [startNodeOptions]);
 
   const searchedStartOptions = useMemo(() => {
     const q = normalizeSearchValue(startQuery);
@@ -933,6 +559,10 @@ export default function Navigate() {
     if (navigationFloor !== null && navigationFloor !== undefined) return navigationFloor;
     return autoFloor;
   }, [autoFloor, committedFloorLock, navigationFloor, transitionFloorLock]);
+
+  const recenterTargetCoord = useMemo(() => {
+    return mapUserCoord;
+  }, [mapUserCoord]);
 
   const routingFloor = useMemo(() => {
     if (committedFloorLock !== null) return committedFloorLock;
@@ -1332,15 +962,41 @@ export default function Navigate() {
       }
 
       const effectivePrefer = preferOverride ?? prefer;
-      const result = computeRoute(navData.nodes, navData.edges, startId, destinationId, { prefer: effectivePrefer });
+      const alternatePrefer = effectivePrefer === "stairs" ? "elevator" : "stairs";
+      const routeTimingCategory =
+        reason === null || reason === "initial" || (reason === "destination-change" && !isStarted)
+          ? "initial-route"
+          : "reroute";
+      const routeComputeStartedAtMs = Date.now();
+      const preferredResult = computeRoute(navData.nodes, navData.edges, startId, destinationId, {
+        prefer: effectivePrefer,
+      });
+      let result = preferredResult;
+      let usedFallbackPreference = false;
+
+      if (!preferredResult.ok) {
+        const alternateResult = computeRoute(navData.nodes, navData.edges, startId, destinationId, {
+          prefer: alternatePrefer,
+        });
+
+        if (alternateResult.ok) {
+          result = alternateResult;
+          usedFallbackPreference = true;
+        }
+      }
+
+      const computeDurationMs = Date.now() - routeComputeStartedAtMs;
 
       if (!result.ok) {
+        setRoutePreferenceNotice(null);
         trackEvent("route.compute_failed", {
           startId,
           destinationId,
           prefer: effectivePrefer,
           reason: reason || result.reason || null,
           routeError: result.reason || null,
+          routeTimingCategory,
+          computeDurationMs,
         });
         setRoute({
           ok: false,
@@ -1353,6 +1009,14 @@ export default function Navigate() {
         });
         return false;
       }
+
+      setRoutePreferenceNotice(
+        usedFallbackPreference
+          ? effectivePrefer === "elevator"
+            ? "No se encontro una ruta por ascensor. Mostrando la mejor ruta disponible."
+            : "No se encontro una ruta que priorice escaleras. Mostrando la mejor ruta disponible."
+          : null
+      );
 
       setRoute({
         ok: true,
@@ -1368,16 +1032,20 @@ export default function Navigate() {
         startId,
         destinationId,
         prefer: effectivePrefer,
+        appliedPrefer: result.summary?.prefer ?? effectivePrefer,
+        usedFallbackPreference,
         reason: reason || "initial",
+        routeTimingCategory,
         totalMeters: result.summary?.totalMeters ?? null,
         etaMinutes: result.summary?.etaMinutes ?? null,
         destinationFloor: result.summary?.destinationFloor ?? null,
+        computeDurationMs,
       });
 
       setActiveStepIndex(0);
       return true;
     },
-    [destinationId, navData.edges, navData.nodes, prefer, setActiveStepIndex, setRoute]
+    [destinationId, isStarted, navData.edges, navData.nodes, prefer, setActiveStepIndex, setRoute]
   );
 
   useEffect(() => {
@@ -1405,6 +1073,7 @@ export default function Navigate() {
   ]);
 
   const statusMessage = useMemo(() => {
+    if (routePreferenceNotice) return routePreferenceNotice;
     if (showRerouteNotice) return "Recalculando ruta...";
     if (isStarted && visibleFloorOptions.length > 1) {
       const roleLabel = visibleFloorOptions[0]?.role || "transición";
@@ -1412,7 +1081,7 @@ export default function Navigate() {
       return `Cerca de ${roleLabel} · Presione para ver vista previa ${floorsText}`;
     }
     return `Planta ${currentFloor ?? "-"}`;
-  }, [currentFloor, isStarted, showRerouteNotice, visibleFloorOptions]);
+  }, [currentFloor, isStarted, routePreferenceNotice, showRerouteNotice, visibleFloorOptions]);
 
   const userHeading = useMemo(() => {
     if (!isStarted) {
@@ -1476,22 +1145,31 @@ export default function Navigate() {
   }, [route.summary?.etaMinutes]);
 
   const startedRouteLayers = useMemo(() => {
-    const visibleSegments = segments
+    const visibleSegments: { segment: any; index: number }[] = segments
       .map((segment: any, index: number) => ({ segment, index }))
-      .filter(({ segment }) => segmentTouchesFloor(segment, currentFloor));
+      .filter((item: { segment: any; index: number }) => segmentTouchesFloor(item.segment, currentFloor));
 
-    const remainingVisibleSegments = visibleSegments.filter(({ index }) => index >= activeStepIndex);
-    const completedVisibleSegments = visibleSegments.filter(({ index }) => index < activeStepIndex);
+    const remainingVisibleSegments = visibleSegments.filter(
+      (item: { segment: any; index: number }) => item.index >= activeStepIndex
+    );
+    const completedVisibleSegments = visibleSegments.filter(
+      (item: { segment: any; index: number }) => item.index < activeStepIndex
+    );
 
     const primarySegment = remainingVisibleSegments[0]?.segment || null;
 
     const primaryFeatures = primarySegment?.geojson?.features || [];
+    const secondaryRemainingSegments = remainingVisibleSegments.filter(
+      (item: { segment: any; index: number }) => item.segment !== primarySegment
+    );
+    const collectFeatures = (items: { segment: any; index: number }[]) =>
+      items.reduce((allFeatures: any[], item) => {
+        return [...allFeatures, ...(item.segment?.geojson?.features || [])];
+      }, [] as any[]);
 
     const secondaryFeatures = [
-      ...completedVisibleSegments.flatMap(({ segment }) => segment?.geojson?.features || []),
-      ...remainingVisibleSegments
-        .filter(({ segment }) => segment !== primarySegment)
-        .flatMap(({ segment }) => segment?.geojson?.features || []),
+      ...collectFeatures(completedVisibleSegments),
+      ...collectFeatures(secondaryRemainingSegments),
     ];
 
     return {
@@ -1551,7 +1229,7 @@ export default function Navigate() {
           } else {
             hasShownLocationPrivacyNoteRef.current = true;
             granted = await new Promise<boolean>((resolve) => {
-              Alert.alert("Nota de privacidad", LOCATION_PRIVACY_NOTE, [
+              Alert.alert("Nota de privacidad", "La localizacion se usa solo para mostrar tu posicion y recomendar la mejor entrada.", [
                 { text: "Ahora no", style: "cancel", onPress: () => resolve(false) },
                 {
                   text: "Continuar",
@@ -1568,12 +1246,7 @@ export default function Navigate() {
         if (!isMounted || !granted) return;
 
         const initialHeading = await LocationImpl.getHeadingAsync();
-        const initialValue =
-          typeof initialHeading?.trueHeading === "number" && initialHeading.trueHeading >= 0
-            ? initialHeading.trueHeading
-            : typeof initialHeading?.magHeading === "number"
-              ? initialHeading.magHeading
-              : null;
+        const initialValue = getHeadingValue(initialHeading);
 
         if (isMounted && typeof initialValue === "number") {
           setSensorHeading(initialValue);
@@ -1581,13 +1254,7 @@ export default function Navigate() {
 
         subscription = await LocationImpl.watchHeadingAsync((heading: any) => {
           if (!isMounted) return;
-
-          const nextHeading =
-            typeof heading?.trueHeading === "number" && heading.trueHeading >= 0
-              ? heading.trueHeading
-              : typeof heading?.magHeading === "number"
-                ? heading.magHeading
-                : null;
+          const nextHeading = getHeadingValue(heading);
 
           if (typeof nextHeading === "number") {
             setSensorHeading(nextHeading);
@@ -1705,6 +1372,7 @@ export default function Navigate() {
 
   useEffect(() => {
     if (!isStarted) return;
+    if (!followsCurrentLocation) return;
 
     const nearbyNodeId =
       nearbyInstructionNode?.properties?.id ||
@@ -1756,6 +1424,7 @@ export default function Navigate() {
     routeNodeOrder,
     setCommittedFloorLock,
     setLiveFloor,
+    followsCurrentLocation,
   ]);
 
   useEffect(() => {
@@ -1801,6 +1470,7 @@ export default function Navigate() {
 
   useEffect(() => {
     if (!isStarted || !userCoord) return;
+    if (!followsCurrentLocation) return;
     if (!segments.length) return;
     if (activeStepIndex >= segments.length) return;
 
@@ -1861,10 +1531,12 @@ export default function Navigate() {
     syncAnchoredNodesToFloor,
     transitionFloorLock,
     userCoord,
+    followsCurrentLocation,
   ]);
 
   useEffect(() => {
     if (!isStarted || !userCoord) return;
+    if (!followsCurrentLocation) return;
 
     const activeSegment = segments[activeStepIndex] || null;
     const activeCoords = activeSegment?.geojson?.features?.[0]?.geometry?.coordinates || [];
@@ -1908,7 +1580,6 @@ export default function Navigate() {
             navData.nodes,
             userCoord,
             routingFloor,
-            destinationId,
             currentInstructionNodeIds,
             REROUTE_SNAP_RADIUS_METERS
           )
@@ -1917,7 +1588,6 @@ export default function Navigate() {
         navData.nodes,
         userCoord,
         routingFloor,
-        destinationId,
         forwardAllowedNodeIds,
         REROUTE_SNAP_RADIUS_METERS
       ) ||
@@ -1927,7 +1597,6 @@ export default function Navigate() {
         navData.nodes,
         userCoord,
         routingFloor,
-        destinationId,
         forwardAllowedNodeIds
       );
 
@@ -1964,6 +1633,7 @@ export default function Navigate() {
     route.geojson,
     segments,
     userCoord,
+    followsCurrentLocation,
   ]);
 
   const handlePreferencePress = useCallback(() => {
@@ -2096,7 +1766,7 @@ export default function Navigate() {
 
   const showInstructionBanner = isStarted && Boolean(nextInstruction);
   const instructionBannerReservedHeight = showInstructionBanner
-    ? Math.max(96, insets.top + 104)
+    ? Math.max(128, insets.top + 132)
     : 0;
 
   return (
@@ -2124,13 +1794,7 @@ export default function Navigate() {
           {showStartDropdown ? (
             <View style={styles.startDropdown}>
               <View style={styles.startSearchWrap}>
-                <TextInput
-                  value={startQuery}
-                  onChangeText={setStartQuery}
-                  placeholder="Escriba punto de partida"
-                  placeholderTextColor="rgba(29, 27, 32, 0.65)"
-                  style={styles.startSearchInput}
-                />
+                <TextInput value={startQuery} onChangeText={setStartQuery} placeholder="Escriba punto de partida" placeholderTextColor="rgba(29, 27, 32, 0.65)" style={styles.startSearchInput} />
                 <Ionicons name="search" size={18} color="rgba(29, 27, 32, 0.75)" />
               </View>
 
@@ -2139,9 +1803,9 @@ export default function Navigate() {
                   <Text style={styles.currentLocationFloorPromptTitle}>
                     ¿En qué planta se encuentra?
                   </Text>
-                  <Text style={styles.currentLocationFloorPromptBody}>
-                    Antes de usar su ubicación actual, indique si se encuentra en la planta 0 o en la planta 1.
-                  </Text>
+                    <Text style={styles.currentLocationFloorPromptBody}>
+                      Antes de usar su ubicacion actual, indique si se encuentra en la planta 0 o en la planta 1.
+                    </Text>
                   <View style={styles.currentLocationFloorPromptActions}>
                     {[0, 1].map((floor) => (
                       <Pressable
@@ -2153,7 +1817,7 @@ export default function Navigate() {
                           setNavigationStarted(false);
                           clearPostNavStartOverride();
                           setLiveFloor(floor);
-                          setStartNode(option.id);
+                          setStartNode(option.id, "current-location", userCoord);
                           setShowCurrentLocationFloorPrompt(false);
                           setShowStartDropdown(false);
                           setStartQuery("");
@@ -2167,14 +1831,14 @@ export default function Navigate() {
               ) : null}
 
               <ScrollView style={styles.startOptionsScroll} contentContainerStyle={styles.startOptionsContent}>
-                {(startQuery.trim() ? searchedStartOptions : entranceStartOptions).map((option: any) => (
+                {(startQuery.trim() ? searchedStartOptions : startNodeOptions).map((option: any) => (
                   <Pressable
                     key={`start-option-${option.id}`}
                     style={[styles.startOptionRow, start.nodeId === option.id && styles.startOptionRowActive]}
                     onPress={() => {
                       setNavigationStarted(false);
                       clearPostNavStartOverride();
-                      setStartNode(option.id);
+                      setStartNode(option.id, "manual-node", userCoord);
                       setShowCurrentLocationFloorPrompt(false);
                       setShowStartDropdown(false);
                       setStartQuery("");
@@ -2185,12 +1849,19 @@ export default function Navigate() {
                   </Pressable>
                 ))}
 
-                <Pressable
-                  style={styles.currentLocationOption}
-                  onPress={() => {
-                    setShowCurrentLocationFloorPrompt(true);
-                  }}
-                >
+                  <Pressable
+                    style={styles.currentLocationOption}
+                    onPress={() => {
+                      if (!currentLocationAvailable) {
+                        Alert.alert(
+                          "Ubicacion no disponible",
+                          "Puedes seguir usando la app eligiendo manualmente el punto de inicio."
+                        );
+                        return;
+                      }
+                      setShowCurrentLocationFloorPrompt(true);
+                    }}
+                  >
                   <Ionicons
                     name="locate"
                     size={18}
@@ -2217,7 +1888,7 @@ export default function Navigate() {
                             setNavigationStarted(false);
                             clearPostNavStartOverride();
                             setLiveFloor(floor);
-                            setStartNode(option.id);
+                            setStartNode(option.id, "current-location", userCoord);
                             setShowCurrentLocationFloorPrompt(false);
                             setShowStartDropdown(false);
                             setStartQuery("");
@@ -2236,9 +1907,7 @@ export default function Navigate() {
           <Pressable style={[styles.locationCard, { backgroundColor: palette.surfaceAlt }]} onPress={() => router.push("/search")}>
             <View style={styles.cardTextWrap}>
               <Text style={[styles.cardLabel, { color: palette.textSectionTitles }]}>Destino</Text>
-              <Text style={[styles.cardTitle, { color: palette.textPrimary }]}>
-                {getNodeLabel(navData.nodes, destinationId) || "Seleccionar destino"}
-              </Text>
+              <Text style={[styles.cardTitle, { color: palette.textPrimary }]}>{getNodeLabel(navData.nodes, destinationId) || "Seleccionar destino"}</Text>
               <Text style={[styles.cardMeta, { color: palette.textPrimary }]}>
                 {route.ok
                   ? `Planta ${route.summary?.destinationFloor ?? destinationFeature?.properties?.floor ?? "-"}${destinationDirectoryEntry?.roomNumber ? ` | Sala ${destinationDirectoryEntry.roomNumber}` : ""} | ${route.summary?.etaMinutes ?? "?"} min | ${route.summary?.totalMeters ?? "?"} m`
@@ -2276,12 +1945,7 @@ export default function Navigate() {
         </View>
       ) : null}
 
-      <View
-        style={[
-          styles.mapWrap,
-          instructionBannerReservedHeight > 0 ? { paddingTop: instructionBannerReservedHeight } : null,
-        ]}
-      >
+      <View style={[styles.mapWrap, instructionBannerReservedHeight > 0 ? { paddingTop: instructionBannerReservedHeight } : null]}>
         <IndoorMap
           currentFloor={currentFloor}
           nodes={navData.renderNodes}
@@ -2359,7 +2023,21 @@ export default function Navigate() {
             </Pressable>
 
             <View style={styles.mapActions}>
-              <Pressable style={styles.mapActionButton} onPress={() => router.replace("/ar")}>
+              <Pressable
+                style={styles.mapActionButton}
+                onPress={() => {
+                  trackEvent("navigation.guidance_mode_changed", {
+                    fromMode: "2d",
+                    toMode: "ar",
+                    destinationId,
+                    activeStepIndex,
+                    routeElapsedSeconds: routeStartedAtMs
+                      ? Math.round((Date.now() - routeStartedAtMs) / 1000)
+                      : null,
+                  });
+                  router.replace("/ar");
+                }}
+              >
                 <Ionicons name="camera-outline" size={26} color={palette.background} />
                 <Text style={styles.mapActionBadge}>RA</Text>
               </Pressable>
@@ -2443,13 +2121,16 @@ export default function Navigate() {
             onPress={() => {
               if (isStarted) {
                 setShowSteps(false);
-                setNavigationStarted(false);
                 trackEvent("navigation.completed", {
                   destinationId,
                   totalMeters: route.summary?.totalMeters ?? null,
                   etaMinutes: route.summary?.etaMinutes ?? null,
                   activeStepIndex,
+                  actualDurationSeconds: routeStartedAtMs
+                    ? Math.round((Date.now() - routeStartedAtMs) / 1000)
+                    : null,
                 });
+                setNavigationStarted(false);
                 if (destinationId) {
                   router.replace(`/post-navigation?completedDestinationId=${encodeURIComponent(destinationId)}`);
                 }
@@ -2677,12 +2358,8 @@ const styles = StyleSheet.create({
     color: AppPalette.textPrimary,
     fontFamily: FONT_BODY,
   },
-  startOptionsScroll: {
-    marginTop: 8,
-  },
-  startOptionsContent: {
-    gap: 8,
-  },
+  startOptionsScroll: { marginTop: 8 },
+  startOptionsContent: { gap: 8 },
   startOptionRow: {
     borderRadius: 12,
     borderWidth: 1,
@@ -2691,10 +2368,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
-  startOptionRowActive: {
-    borderColor: AppPalette.primary,
-    borderWidth: 2,
-  },
+  startOptionRowActive: { borderColor: AppPalette.primary, borderWidth: 2 },
   startOptionTitle: {
     fontSize: 14,
     fontWeight: "700",
@@ -2751,10 +2425,7 @@ const styles = StyleSheet.create({
     color: AppPalette.textPrimary,
     fontFamily: FONT_BODY,
   },
-  currentLocationFloorPromptActions: {
-    flexDirection: "row",
-    gap: 8,
-  },
+  currentLocationFloorPromptActions: { flexDirection: "row", gap: 8 },
   currentLocationFloorButton: {
     flex: 1,
     borderRadius: 12,
@@ -2763,12 +2434,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  currentLocationFloorButtonText: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#FFFFFF",
-    fontFamily: FONT_BODY,
-  },
+  currentLocationFloorButtonText: { fontSize: 14, fontWeight: "800", color: "#FFFFFF", fontFamily: FONT_BODY },
   mapWrap: { flex: 1, minHeight: 260, overflow: "hidden", position: "relative" },
   instructionBanner: {
     position: "absolute",
@@ -2782,13 +2448,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   instructionRow: { flexDirection: "row", alignItems: "center" },
-  instructionIconWrap: {
-    width: 48,
-    height: 48,
-    marginRight: 10,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  instructionIconWrap: { width: 48, height: 48, marginRight: 10, alignItems: "center", justifyContent: "center" },
   instructionIcon: { textAlign: "center" },
   instructionTitle: {
     flex: 1,
@@ -2860,16 +2520,8 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 4,
   },
-  targetButtonActive: {
-    backgroundColor: AppPalette.primary,
-    borderWidth: 2,
-    borderColor: "#000000",
-  },
-  targetButtonInactive: {
-    backgroundColor: "#ffffff",
-    borderWidth: 2,
-    borderColor: AppPalette.primary,
-  },
+  targetButtonActive: { backgroundColor: AppPalette.primary, borderWidth: 2, borderColor: "#000000" },
+  targetButtonInactive: { backgroundColor: "#ffffff", borderWidth: 2, borderColor: AppPalette.primary },
   mapStatusWrap: {
     position: "absolute",
     right: 24,
@@ -2884,9 +2536,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
-  statusPillInteractive: {
-    backgroundColor: "#2A7C8E",
-  },
+  statusPillInteractive: { backgroundColor: "#2A7C8E" },
   statusPillText: { fontSize: 16, fontWeight: "800", color: AppPalette.background, fontFamily: FONT_TITLE },
   floorSwitchRow: {
     position: "absolute",
@@ -2896,18 +2546,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
   },
-  floorPillButton: {
-    position: "relative",
-    right: 0,
-    bottom: 0,
-    zIndex: 4,
-  },
-  floorPillButtonInactive: {
-    backgroundColor: AppPalette.background,
-  },
-  floorPillTextInactive: {
-    color: AppPalette.textPrimary,
-  },
+  floorPillButton: { position: "relative", right: 0, bottom: 0, zIndex: 4 },
+  floorPillButtonInactive: { backgroundColor: AppPalette.background },
+  floorPillTextInactive: { color: AppPalette.textPrimary },
   bottomBar: {
     backgroundColor: AppPalette.primary,
     borderTopLeftRadius: 28,
@@ -2951,11 +2592,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
     marginTop: 72,
   },
-  stepsDragHintWrap: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingBottom: 0,
-  },
+  stepsDragHintWrap: { alignItems: "center", justifyContent: "center", paddingBottom: 0 },
   stepsBridge: {
     width: "100%",
     backgroundColor: AppPalette.primary,
@@ -2967,11 +2604,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     paddingHorizontal: 12,
   },
-  stepsBridgeArrow: {
-    alignSelf: "center",
-    transform: [{ scaleX: 2 }],
-    marginBottom: -1,
-  },
+  stepsBridgeArrow: { alignSelf: "center", transform: [{ scaleX: 2 }], marginBottom: -1 },
   stepsBridgeRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -3014,10 +2647,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     backgroundColor: "#E6F3F7",
   },
-  stepItemDivider: {
-    borderTopWidth: 1,
-    borderTopColor: "#8EC6D4",
-  },
+  stepItemDivider: { borderTopWidth: 1, borderTopColor: "#8EC6D4" },
   stepItemCompleted: { backgroundColor: "#EEF5F8" },
   stepItemActive: { backgroundColor: "#D8EBF2" },
   stepActiveBar: {
