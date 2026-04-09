@@ -19,7 +19,19 @@ export type HospitalDirectoryEntry = {
   keywords: string[];
 };
 
-export const DIRECTORY_CATEGORIES: DirectoryCategory[] = [
+export type HospitalDirectoryLoadResult = {
+  source: "backend" | "local-fallback";
+  categoriesCount: number;
+  entriesCount: number;
+  error?: string | null;
+};
+
+// backend endpoint
+const DIRECTORY_URL = process.env.EXPO_PUBLIC_DIRECTORY_URL || "http://localhost:4000/api/directory";
+const DIRECTORY_TIMEOUT_MS = 3000;
+
+// Local fallback data
+const LOCAL_DIRECTORY_CATEGORIES: DirectoryCategory[] = [
   {
     key: "recent",
     chipLabel: "Recientes",
@@ -52,7 +64,7 @@ export const DIRECTORY_CATEGORIES: DirectoryCategory[] = [
   },
 ];
 
-export const HOSPITAL_DIRECTORY: HospitalDirectoryEntry[] = [
+const LOCAL_HOSPITAL_DIRECTORY: HospitalDirectoryEntry[] = [
   {
     id: "spec-gynecology-f1",
     category: "specialties",
@@ -184,14 +196,12 @@ export const HOSPITAL_DIRECTORY: HospitalDirectoryEntry[] = [
     keywords: ["neurologia", "neuro", "sistema nervioso", "023"],
   },
   {
-    id: "spec-wr-f0",
-    category: "specialties",
-    name: "Servicio WR",
-    doctor: "Dr. Miguel Castro",
-    roomNumber: "031",
+    id: "serv-waiting-room-f0",
+    category: "services",
+    name: "Sala de espera",
     floor: 0,
     destinationNodeId: "n_wr_door_1_f0",
-    keywords: ["servicio", "wr", "031"],
+    keywords: ["sala de espera", "espera", "wr"],
   },
   {
     id: "diag-laboratory-f1",
@@ -226,22 +236,6 @@ export const HOSPITAL_DIRECTORY: HospitalDirectoryEntry[] = [
     floor: 1,
     destinationNodeId: "n_car_door_5",
     keywords: ["cafeteria", "comida", "cafe"],
-  },
-  {
-    id: "serv-elevator-f1",
-    category: "services",
-    name: "Ascensor",
-    floor: 1,
-    destinationNodeId: "elevator_001",
-    keywords: ["ascensor", "elevador"],
-  },
-  {
-    id: "serv-stairs-f1",
-    category: "services",
-    name: "Escaleras",
-    floor: 1,
-    destinationNodeId: "stair_001",
-    keywords: ["escaleras", "stairs"],
   },
   {
     id: "serv-elevator-f0",
@@ -279,6 +273,68 @@ export const HOSPITAL_DIRECTORY: HospitalDirectoryEntry[] = [
   },
 ];
 
+async function fetchDirectoryWithTimeout() {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DIRECTORY_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(DIRECTORY_URL, { signal: controller.signal });
+    if (!response.ok) { throw new Error(`Backend returned ${response.status}`); }
+    return await response.json();
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+export let DIRECTORY_CATEGORIES: DirectoryCategory[] = [...LOCAL_DIRECTORY_CATEGORIES];
+export let HOSPITAL_DIRECTORY: HospitalDirectoryEntry[] = [...LOCAL_HOSPITAL_DIRECTORY];
+let directoryLoadPromise: Promise<HospitalDirectoryLoadResult> | null = null;
+
+export async function loadHospitalDirectory() {
+  if (!directoryLoadPromise) {
+    // fetch from backend
+    directoryLoadPromise = fetchDirectoryWithTimeout()
+      .then((data) => {
+        const categories = Array.isArray(data?.categories)
+          ? data.categories
+          : [...LOCAL_DIRECTORY_CATEGORIES];
+        const entries = Array.isArray(data?.entries)
+          ? data.entries
+          : [...LOCAL_HOSPITAL_DIRECTORY];
+
+        DIRECTORY_CATEGORIES = categories;
+        HOSPITAL_DIRECTORY = entries;
+
+        console.log("[HospitalDirectory] Loaded directory from backend", { source: "backend", categories: categories.length, entries: entries.length,});
+        return {
+          source: "backend" as const,
+          categoriesCount: categories.length,
+          entriesCount: entries.length,
+        };
+      })
+      .catch((error) => {
+        // use local fallback when error
+        const categories = [...LOCAL_DIRECTORY_CATEGORIES];
+        const entries = [...LOCAL_HOSPITAL_DIRECTORY];
+        DIRECTORY_CATEGORIES = categories;
+        HOSPITAL_DIRECTORY = entries;
+        console.log("[HospitalDirectory] Backend directory fetch failed, using local fallback", {source: "local-fallback", url: DIRECTORY_URL, error: error?.message || String(error), categories: categories.length, entries: entries.length,});
+        return {
+          source: "local-fallback",
+          categoriesCount: categories.length,
+          entriesCount: entries.length,
+          error: error?.message || String(error),
+        };
+      });
+  }
+  return directoryLoadPromise;
+}
+
+// Have a function for future integration with hospitals to refetch when updates happen
+export function clearHospitalDirectoryCache() {
+  directoryLoadPromise = null;
+}
+
+// remove accents, case, extra spaces so search matches easily
 export function normalizeSearchValue(value: string) {
   return value
     .normalize("NFD")

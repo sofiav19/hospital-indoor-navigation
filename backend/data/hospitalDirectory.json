@@ -163,14 +163,12 @@
       "keywords": ["neurologia", "neuro", "sistema nervioso", "023"]
     },
     {
-      "id": "spec-wr-f0",
-      "category": "specialties",
-      "name": "Servicio WR",
-      "doctor": "Dr. Miguel Castro",
-      "roomNumber": "031",
+      "id": "serv-waiting-room-f0",
+      "category": "services",
+      "name": "Sala de espera",
       "floor": 0,
       "destinationNodeId": "n_wr_door_1_f0",
-      "keywords": ["servicio", "wr", "031"]
+      "keywords": ["sala de espera", "espera", "wr"]
     },
     {
       "id": "diag-laboratory-f1",
@@ -205,22 +203,6 @@
       "floor": 1,
       "destinationNodeId": "n_car_door_5",
       "keywords": ["cafeteria", "comida", "cafe"]
-    },
-    {
-      "id": "serv-elevator-f1",
-      "category": "services",
-      "name": "Ascensor",
-      "floor": 1,
-      "destinationNodeId": "elevator_001",
-      "keywords": ["ascensor", "elevador"]
-    },
-    {
-      "id": "serv-stairs-f1",
-      "category": "services",
-      "name": "Escaleras",
-      "floor": 1,
-      "destinationNodeId": "stair_001",
-      "keywords": ["escaleras", "stairs"]
     },
     {
       "id": "serv-elevator-f0",
