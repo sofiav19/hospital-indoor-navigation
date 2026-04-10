@@ -1,0 +1,21 @@
+{  "0": {
+    "n_hospital_entrance_f0": {
+      "dx": 0,
+      "dy": 0,
+      "scale": 1,
+      "rotate": 3
+    },
+    "n_hospital_entrance_2_f0": {
+      "dx": -7,
+      "dy": -9,
+      "scale": 1,
+      "rotate": 5
+    },
+    "n_wr_door_1_f0": {
+      "dx": 0,
+      "dy": 23,
+      "scale": 1,
+      "rotate": 2
+    }
+  }
+}
