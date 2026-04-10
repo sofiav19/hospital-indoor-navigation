@@ -47,23 +47,23 @@ export function validateNavigationData({
       errors.push("Node missing properties.id");
     } else {
       // Id is unique
-      if (nodeIdSet.has(p.id)) errors.push("Duplicate node id: ${p.id}");
+      if (nodeIdSet.has(p.id)) errors.push(`Duplicate node id: ${p.id}`);
       nodeIdSet.add(p.id);
       nodesById.set(p.id, f);
       if (!adjacency.has(p.id)) adjacency.set(p.id, []);
     }
 
     // Check label, type, role, floor and geometry presence
-    if (!p.label) errors.push("Node ${p.id || '?'} missing label");
-    if (!p.type) errors.push("Node ${p.id || '?'} missing type");
-    if (!p.role) errors.push("Node ${p.id || '?'} missing role");
-    if (typeof p.floor === "undefined") errors.push("Node ${p.id || '?'} missing floor");
-    if (!f.geometry || f.geometry.type !== "Point") errors.push("Node ${p.id || '?'} missing Point geometry");
-    if (!f.geometry?.coordinates) errors.push("Node ${p.id || '?'} missing coordinates");
+    if (!p.label) errors.push(`Node ${p.id || '?'} missing label`);
+    if (!p.type) errors.push(`Node ${p.id || '?'} missing type`);
+    if (!p.role) errors.push(`Node ${p.id || '?'} missing role`);
+    if (typeof p.floor === "undefined") errors.push(`Node ${p.id || '?'} missing floor`);
+    if (!f.geometry || f.geometry.type !== "Point") errors.push(`Node ${p.id || '?'} missing Point geometry`);
+    if (!f.geometry?.coordinates) errors.push(`Node ${p.id || '?'} missing coordinates`);
 
     // Angle is optional except for doors and elevator
     if (["door", "elevator"].includes(p.role)) {
-      if (typeof p.angle === "undefined") errors.push("Node ${p.id || '?'} missing angle (even if 0)");
+      if (typeof p.angle === "undefined") errors.push(`Node ${p.id || '?'} missing angle (even if 0)`);
     }
 
     if (p.role === "doors") {
@@ -87,27 +87,27 @@ export function validateNavigationData({
 
     if (!p.id) errors.push("Edge missing properties.id");
     else {
-      if (edgeIdSet.has(p.id)) errors.push("Duplicate edge id: ${p.id}");
+      if (edgeIdSet.has(p.id)) errors.push(`Duplicate edge id: ${p.id}`);
       edgeIdSet.add(p.id);
     }
 
-    if (!p.label) errors.push("Edge ${edgeId} missing label");
-    if (!p.type) errors.push("Edge ${edgeId} missing type");
-    if (typeof p.floor === "undefined") errors.push("Edge ${edgeId} missing floor");
-    if (!p.from) errors.push("Edge ${edgeId} missing from property");
-    if (!p.to) errors.push("Edge ${edgeId} missing to property");
+    if (!p.label) errors.push(`Edge ${edgeId} missing label`);
+    if (!p.type) errors.push(`Edge ${edgeId} missing type`);
+    if (typeof p.floor === "undefined") errors.push(`Edge ${edgeId} missing floor`);
+    if (!p.from) errors.push(`Edge ${edgeId} missing from property`);
+    if (!p.to) errors.push(`Edge ${edgeId} missing to property`);
 
     // property must exist even if null
     if (!Object.prototype.hasOwnProperty.call(p, "door_id")) {
-      errors.push("Edge ${edgeId} missing door_id property (may be null)");
+      errors.push(`Edge ${edgeId} missing door_id property (may be null)`);
     }
 
-    if (!f.geometry || f.geometry.type !== "LineString") errors.push("Edge ${edgeId} missing LineString geometry");
-    if (!f.geometry?.coordinates) errors.push("Edge ${edgeId} missing coordinates");
+    if (!f.geometry || f.geometry.type !== "LineString") errors.push(`Edge ${edgeId} missing LineString geometry`);
+    if (!f.geometry?.coordinates) errors.push(`Edge ${edgeId} missing coordinates`);
 
     // Check if from/to nodes exist
-    if (p.from && !nodesById.has(p.from)) errors.push("Edge ${edgeId} references unknown from node: ${p.from}");
-    if (p.to && !nodesById.has(p.to)) errors.push("Edge ${edgeId} references unknown to node: ${p.to}");
+    if (p.from && !nodesById.has(p.from)) errors.push(`Edge ${edgeId} references unknown from node: ${p.from}`);
+    if (p.to && !nodesById.has(p.to)) errors.push(`Edge ${edgeId} references unknown to node: ${p.to}`);
 
     // Build adjacency map so we can catch isolated entrances/stairs/elevators.
     if (p.from && p.to && nodesById.has(p.from) && nodesById.has(p.to)) {
@@ -122,13 +122,13 @@ export function validateNavigationData({
 
   // Connectivity: ensure entrances and POIs are connected to the graph
   for (const id of entranceIds) {
-    if ((adjacency.get(id) || []).length === 0) errors.push("Entrance node ${id} is not connected to any edge");
+    if ((adjacency.get(id) || []).length === 0) errors.push(`Entrance node ${id} is not connected to any edge`);
   }
   for (const id of stairsIds) {
-    if ((adjacency.get(id) || []).length === 0) errors.push("Stairs POI ${id} is not connected to any edge");
+    if ((adjacency.get(id) || []).length === 0) errors.push(`Stairs POI ${id} is not connected to any edge`);
   }
   for (const id of elevatorIds) {
-    if ((adjacency.get(id) || []).length === 0) errors.push("Elevator POI ${id} is not connected to any edge");
+    if ((adjacency.get(id) || []).length === 0) errors.push(`Elevator POI ${id} is not connected to any edge`);
   }
   return { valid: errors.length === 0, errors };
 }
