@@ -29,7 +29,7 @@ PORT = int(os.environ.get("PORT", "4000"))
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 if not DATABASE_URL:
-    raise RuntimeError("Missing DATABASE_URL. Create backend/.env from backend/.env.example.")
+    raise RuntimeError("Missing DATABASE_URL. Create backend/.env defining DATABASE_URL")
 
 app = Flask(__name__)
 
